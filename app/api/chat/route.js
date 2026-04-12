@@ -16,6 +16,16 @@ const CITY_ALIASES = {
 };
 
 const IATA_STOPWORDS = new Set(["THE", "AND", "FOR", "AIR", "YOU", "ARE"]);
+const DUFFEL_BASE_URL = "https://api.duffel.com";
+const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v2";
+const DUFFEL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const DUFFEL_MAX_PAGES = 12;
+const DUFFEL_MAX_CODES_PER_REQUEST = 12;
+
+const duffelAirlineCache = {
+  byCode: new Map(),
+  expiresAt: 0,
+};
 
 function json(data, status = 200) {
   return Response.json(data, { status });
@@ -572,6 +582,129 @@ function extractIataFromText(text) {
   return matches.find((token) => !IATA_STOPWORDS.has(token)) || null;
 }
 
+function withTimeout(promise, timeoutMs = 5000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+  ]);
+}
+
+function findAirlineIataCode(flight) {
+  const labels = Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : [];
+
+  for (const label of labels) {
+    const text = String(label || "").trim();
+    const match = text.match(/\b([A-Z0-9]{2})\s?\d{1,4}\b/);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  return null;
+}
+
+function collectAirlineCodesFromFlights(flights) {
+  const seen = new Set();
+
+  for (const flight of flights) {
+    const code = findAirlineIataCode(flight);
+    if (!code) continue;
+    seen.add(code);
+    if (seen.size >= DUFFEL_MAX_CODES_PER_REQUEST) break;
+  }
+
+  return [...seen];
+}
+
+async function fetchDuffelAirlinesPage(after = null) {
+  const params = new URLSearchParams({ limit: "200" });
+  if (after) params.set("after", after);
+
+  const res = await withTimeout(
+    fetch(`${DUFFEL_BASE_URL}/air/airlines?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.DUFFEL_API_KEY}`,
+        "Duffel-Version": DUFFEL_VERSION,
+      },
+    }),
+    5000
+  );
+
+  if (!res.ok) {
+    throw new Error(`duffel_airlines_failed:${res.status}`);
+  }
+
+  const payload = await res.json().catch(() => ({}));
+  return {
+    data: Array.isArray(payload?.data) ? payload.data : [],
+    after: payload?.meta?.after || null,
+  };
+}
+
+async function loadDuffelAirlineCache() {
+  if (!process.env.DUFFEL_API_KEY) return;
+  if (duffelAirlineCache.expiresAt > Date.now() && duffelAirlineCache.byCode.size > 0) return;
+
+  const nextMap = new Map();
+  let after = null;
+
+  for (let page = 0; page < DUFFEL_MAX_PAGES; page += 1) {
+    const pageResult = await fetchDuffelAirlinesPage(after);
+    for (const airline of pageResult.data) {
+      const code = normalizeWhitespace(airline?.iata_code || "").toUpperCase();
+      if (!code) continue;
+      nextMap.set(code, {
+        name: normalizeWhitespace(airline?.name || "") || null,
+        iata_code: code,
+        icao_code: normalizeWhitespace(airline?.icao_code || "") || null,
+        logo_url:
+          airline?.logo_symbol_url ||
+          airline?.logo_lockup_url ||
+          airline?.logo_square_url ||
+          airline?.logo_url ||
+          null,
+      });
+    }
+
+    after = pageResult.after;
+    if (!after) break;
+  }
+
+  if (nextMap.size > 0) {
+    duffelAirlineCache.byCode = nextMap;
+    duffelAirlineCache.expiresAt = Date.now() + DUFFEL_CACHE_TTL_MS;
+  }
+}
+
+async function enrichFlightsWithDuffel(flights) {
+  if (!process.env.DUFFEL_API_KEY || !Array.isArray(flights) || flights.length === 0) {
+    return flights;
+  }
+
+  try {
+    const codes = collectAirlineCodesFromFlights(flights);
+    if (codes.length === 0) return flights;
+
+    await loadDuffelAirlineCache();
+    if (duffelAirlineCache.byCode.size === 0) return flights;
+
+    return flights.map((flight) => {
+      const code = findAirlineIataCode(flight);
+      if (!code) return flight;
+
+      const info = duffelAirlineCache.byCode.get(code);
+      if (!info) return { ...flight, airline_iata_code: code };
+
+      return {
+        ...flight,
+        airline: info.name || flight.airline,
+        airline_iata_code: info.iata_code || code,
+        airline_logo_url: info.logo_url || null,
+      };
+    });
+  } catch {
+    return flights;
+  }
+}
+
 async function lookupAirportByFlightsEngine(query) {
   const res = await fetch(
     `https://serpapi.com/search.json?engine=google_flights_airports&q=${encodeURIComponent(
@@ -752,7 +885,11 @@ function matchesAirlineBrand(flight, requestedAirline) {
   const needle = simplifyBrandText(requestedAirline);
   if (!needle) return true;
 
-  const labels = [flight?.airline, ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : [])]
+  const labels = [
+    flight?.airline,
+    flight?.airline_iata_code,
+    ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : []),
+  ]
     .map((value) => simplifyBrandText(value || ""))
     .filter(Boolean);
 
@@ -802,6 +939,7 @@ async function fetchFlights(origin, destination, state) {
 
     return {
       airline: first?.airline || "Unknown",
+      airline_iata_code: findAirlineIataCode({ flight_numbers: allFlightLabels }),
       price: priceValue != null ? `${priceValue} INR` : "N/A",
       price_value: priceValue,
       cabin_class: state.class || "economy",
@@ -818,9 +956,10 @@ async function fetchFlights(origin, destination, state) {
     };
   });
 
+  const enrichedFlights = await enrichFlightsWithDuffel(normalized);
   const airlineFiltered = state.airline_brand
-    ? normalized.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
-    : normalized;
+    ? enrichedFlights.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
+    : enrichedFlights;
 
   const ranked = rankFlights(airlineFiltered, state);
   if (state.direct_only) {

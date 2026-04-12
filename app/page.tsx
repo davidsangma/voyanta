@@ -10,6 +10,8 @@ type ApiHistoryMessage = {
 
 type Flight = {
   airline: string;
+  airline_iata_code?: string;
+  airline_logo_url?: string | null;
   price: string;
   cabin_class?: string;
   trip_type?: "one_way" | "round_trip";
@@ -585,7 +587,24 @@ export default function Home() {
                                     />
                                   </div>
                                 )}
-                                <p className="font-semibold">{flight.airline}</p>
+                                <div className="flex items-center gap-2">
+                                  {flight.airline_logo_url && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={flight.airline_logo_url}
+                                      alt={`${flight.airline} logo`}
+                                      width={18}
+                                      height={18}
+                                      className="rounded-sm object-contain"
+                                      loading="lazy"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  )}
+                                  <p className="font-semibold">
+                                    {flight.airline}
+                                    {flight.airline_iata_code ? ` (${flight.airline_iata_code})` : ""}
+                                  </p>
+                                </div>
                                 <p className="text-sm text-[var(--text-secondary)]">
                                   {flight.origin} -&gt; {flight.destination} | {flight.duration}
                                 </p>

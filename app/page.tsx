@@ -90,6 +90,15 @@ type BotChatMessage = {
 };
 
 type ChatMessage = UserChatMessage | BotChatMessage;
+type EditableStateKey =
+  | "source_city"
+  | "destination_city"
+  | "departure_date"
+  | "class"
+  | "hotel_required"
+  | "hotel_star_rating"
+  | "direct_only"
+  | "budget_mode";
 
 const SESSION_STORAGE_KEY = "travel_ai_session_id_v1";
 const MESSAGE_STORAGE_PREFIX = "travel_ai_messages_v1";
@@ -124,17 +133,20 @@ function formatStateSummary(state: TripState | null): string {
 }
 
 function toApiHistory(messages: ChatMessage[]): ApiHistoryMessage[] {
-  return messages.flatMap((message) => {
+  const history: ApiHistoryMessage[] = [];
+
+  messages.forEach((message) => {
     if (message.role === "user") {
-      return [{ role: "user", content: message.content }];
+      history.push({ role: "user", content: message.content });
+      return;
     }
 
     if (isFollowUpResponse(message.data) && message.data.message) {
-      return [{ role: "assistant", content: message.data.message }];
+      history.push({ role: "assistant", content: message.data.message });
     }
-
-    return [];
   });
+
+  return history;
 }
 
 function getMessageStorageKey(sessionId: string): string {
@@ -323,7 +335,7 @@ export default function Home() {
     await submitTurn(text, nextState);
   };
 
-  const editStateChip = async (key: keyof TripState) => {
+  const editStateChip = async (key: EditableStateKey) => {
     if (!stateSnapshot) return;
     const next = { ...stateSnapshot };
 
@@ -464,7 +476,7 @@ export default function Home() {
                     <button
                       key={key}
                       onClick={() => {
-                        void editStateChip(key as keyof TripState);
+                        void editStateChip(key as EditableStateKey);
                       }}
                       className="text-xs bg-[linear-gradient(135deg,#f7f1e8,#f2e6d8)] border border-[var(--border-soft)] rounded-full px-3 py-1 hover:bg-[#f0d8d2]"
                     >

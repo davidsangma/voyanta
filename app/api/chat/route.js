@@ -1065,12 +1065,44 @@ function meetsHotelStarConstraint(hotel, requestedStars) {
   return rating >= threshold;
 }
 
-async function fetchHotels(state) {
+function getDefaultCheckoutDate(state) {
+  return state.return_date || toISODate(addDays(new Date(state.departure_date), 2)) || "";
+}
+
+function dedupeHotels(hotels) {
+  const byKey = new Map();
+
+  hotels.forEach((hotel) => {
+    if (!hotel?.name) return;
+    const key = simplifyBrandText(hotel.name);
+    if (!key) return;
+
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, hotel);
+      return;
+    }
+
+    // Prefer entries with richer data (price + rating + link).
+    const score = (item) =>
+      (typeof item.price_value === "number" ? 1 : 0) +
+      (typeof item.rating === "number" ? 1 : 0) +
+      (item.link && item.link !== "#" ? 1 : 0);
+
+    if (score(hotel) > score(existing)) {
+      byKey.set(key, hotel);
+    }
+  });
+
+  return [...byKey.values()];
+}
+
+async function fetchHotelsFromSerpApi(state) {
   const params = new URLSearchParams({
     engine: "google_hotels",
     q: `hotels in ${state.destination_city}`,
     check_in_date: state.departure_date,
-    check_out_date: state.return_date || toISODate(addDays(new Date(state.departure_date), 2)) || "",
+    check_out_date: getDefaultCheckoutDate(state),
     currency: "INR",
     hl: "en",
     gl: "in",
@@ -1109,7 +1141,105 @@ async function fetchHotels(state) {
     rawHotels = await fetchProperties(fallback);
   }
 
-  let hotels = mapHotels(rawHotels).filter((h) => h.name && h.name !== "Unknown");
+  return mapHotels(rawHotels).filter((h) => h.name && h.name !== "Unknown");
+}
+
+async function fetchBookingDestination(destinationCity) {
+  if (!process.env.RAPIDAPI_KEY) return null;
+
+  const params = new URLSearchParams({ query: destinationCity });
+  const res = await withTimeout(
+    fetch(`https://booking-com15.p.rapidapi.com/api/v1/hotels/searchDestination?${params.toString()}`, {
+      headers: {
+        "X-RapidAPI-Key": process.env.RAPIDAPI_KEY,
+        "X-RapidAPI-Host": "booking-com15.p.rapidapi.com",
+      },
+    }),
+    8000
+  );
+
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  const list = Array.isArray(data?.data) ? data.data : [];
+  if (list.length === 0) return null;
+
+  const best =
+    list.find((item) => item?.search_type === "city") ||
+    list.find((item) => item?.dest_type === "city") ||
+    list[0];
+
+  if (!best?.dest_id || !best?.search_type) return null;
+  return { dest_id: String(best.dest_id), search_type: String(best.search_type) };
+}
+
+function mapBookingHotels(rawHotels) {
+  if (!Array.isArray(rawHotels)) return [];
+
+  return rawHotels.slice(0, 20).map((entry) => {
+    const property = entry?.property || {};
+    const name = normalizeWhitespace(property?.name || "");
+    const priceValue = parsePrice(property?.priceBreakdown?.grossPrice?.value);
+    const currency = normalizeWhitespace(property?.priceBreakdown?.grossPrice?.currency || "INR") || "INR";
+    const fallbackLink = name
+      ? `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(name)}`
+      : "#";
+
+    return {
+      name: name || "Unknown",
+      rating: typeof property?.reviewScore === "number" ? property.reviewScore : null,
+      hotel_class: parseHotelClass(property?.accuratePropertyClass ?? property?.propertyClass ?? null),
+      price: priceValue != null ? `${priceValue} ${currency}` : "N/A",
+      price_value: priceValue,
+      link: property?.url || property?.hotelUrl || fallbackLink,
+    };
+  });
+}
+
+async function fetchHotelsFromBookingApi(state) {
+  if (!process.env.RAPIDAPI_KEY) return [];
+
+  const destination = await fetchBookingDestination(state.destination_city).catch(() => null);
+  if (!destination) return [];
+
+  const params = new URLSearchParams({
+    dest_id: destination.dest_id,
+    search_type: destination.search_type,
+    arrival_date: state.departure_date,
+    departure_date: getDefaultCheckoutDate(state),
+    adults: "1",
+    children_age: "0,17",
+    room_qty: "1",
+    page_number: "1",
+    units: "metric",
+    temperature_unit: "c",
+    languagecode: "en-us",
+    currency_code: "INR",
+  });
+
+  const res = await withTimeout(
+    fetch(`https://booking-com15.p.rapidapi.com/api/v1/hotels/searchHotels?${params.toString()}`, {
+      headers: {
+        "X-RapidAPI-Key": process.env.RAPIDAPI_KEY,
+        "X-RapidAPI-Host": "booking-com15.p.rapidapi.com",
+      },
+    }),
+    10000
+  );
+
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({}));
+  const hotels = Array.isArray(data?.data?.hotels) ? data.data.hotels : [];
+
+  return mapBookingHotels(hotels).filter((h) => h.name && h.name !== "Unknown");
+}
+
+async function fetchHotels(state) {
+  const [serpHotelsRaw, bookingHotelsRaw] = await Promise.all([
+    fetchHotelsFromSerpApi(state).catch(() => []),
+    fetchHotelsFromBookingApi(state).catch(() => []),
+  ]);
+
+  let hotels = dedupeHotels([...serpHotelsRaw, ...bookingHotelsRaw]);
 
   if (state.hotel_star_rating) {
     hotels = hotels.filter((h) => meetsHotelStarConstraint(h, state.hotel_star_rating));

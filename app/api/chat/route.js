@@ -357,16 +357,74 @@ function extractCabinClassFromText(text) {
   const value = String(text || "").toLowerCase();
   if (!value) return null;
 
-  if (/\b(first\s*class|1st\s*class|switch to first|go first class|first class trip)\b/.test(value)) {
+  if (
+    /\b(first\s*class|1st\s*class|switch to first|go first class|first class trip|first class tickets?|tickets? in first class|only first class)\b/.test(
+      value
+    )
+  ) {
     return "first";
   }
 
-  if (/\b(business\s*class|switch to business|go business class|business trip)\b/.test(value)) {
+  if (
+    /\b(business\s*class|switch to business|go business class|business trip|business tickets?|tickets? in business class|only business class)\b/.test(
+      value
+    )
+  ) {
     return "business";
   }
 
-  if (/\b(premium\s*economy)\b/.test(value)) return "premium_economy";
-  if (/\b(economy(\s*class)?)\b/.test(value)) return "economy";
+  if (/\b(premium\s*economy|premium tickets?)\b/.test(value)) return "premium_economy";
+  if (/\b(economy(\s*class)?|economy tickets?|only economy)\b/.test(value)) return "economy";
+
+  return null;
+}
+
+function extractDirectOnlyFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  if (
+    /\b(only direct|direct flights only|non[- ]?stop only|non[- ]?stop flights only|no layover|without layover|without layovers|no stops?)\b/.test(
+      value
+    )
+  ) {
+    return true;
+  }
+
+  if (/\b(with layovers?|allow layovers?|stops are okay|connecting flights are okay)\b/.test(value)) {
+    return false;
+  }
+
+  return null;
+}
+
+function extractBudgetModeFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  if (/\b(luxury|premium|best experience|high[- ]end)\b/.test(value)) return "luxury";
+  if (/\b(cheap|budget|low cost|affordable|cheapest)\b/.test(value)) return "budget";
+  if (/\b(balanced|mid range|middle)\b/.test(value)) return "balanced";
+  return null;
+}
+
+function extractHotelRequiredFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  if (
+    /\b(add hotels?|show hotels?|include hotels?|need hotels?|hotel required|book hotels?|stay included)\b/.test(
+      value
+    )
+  ) {
+    return "yes";
+  }
+
+  if (
+    /\b(no hotels?|without hotels?|skip hotels?|hotel not required|flight only|only flights)\b/.test(value)
+  ) {
+    return "no";
+  }
 
   return null;
 }
@@ -394,22 +452,22 @@ function clearSlot(state, key) {
 function applyRuleOverrides(state, history, preferences) {
   const latest = getLatestUserMessage(history).toLowerCase();
 
-  if (preferences.direct) {
-    setSlot(state, "direct_only", true, "confirmed");
-  }
+  const explicitDirectOnly = extractDirectOnlyFromText(latest);
+  if (explicitDirectOnly != null) setSlot(state, "direct_only", explicitDirectOnly, "confirmed");
+  else if (preferences.direct) setSlot(state, "direct_only", true, "confirmed");
 
-  if (preferences.cheap) {
-    setSlot(state, "budget_mode", "budget", "confirmed");
-  }
+  const explicitBudgetMode = extractBudgetModeFromText(latest);
+  if (explicitBudgetMode) setSlot(state, "budget_mode", explicitBudgetMode, "confirmed");
+  else if (preferences.cheap) setSlot(state, "budget_mode", "budget", "confirmed");
 
   const explicitCabinClass = extractCabinClassFromText(latest);
   if (explicitCabinClass) {
     setSlot(state, "class", explicitCabinClass, "confirmed");
   }
 
-  if (preferences.hotelIntent) {
-    setSlot(state, "hotel_required", "yes", "confirmed");
-  }
+  const explicitHotelRequired = extractHotelRequiredFromText(latest);
+  if (explicitHotelRequired) setSlot(state, "hotel_required", explicitHotelRequired, "confirmed");
+  else if (preferences.hotelIntent) setSlot(state, "hotel_required", "yes", "confirmed");
 
   if (/\b(no hotel|without hotel|skip hotel)\b/.test(latest)) {
     setSlot(state, "hotel_required", "no", "confirmed");

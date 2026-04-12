@@ -160,6 +160,7 @@ function createDefaultState() {
     departure_date: null,
     return_date: null,
     class: "economy",
+    airline_brand: null,
     hotel_required: "no",
     hotel_star_rating: null,
     hotel_brand: null,
@@ -171,6 +172,7 @@ function createDefaultState() {
       departure_date: "unknown",
       return_date: "unknown",
       class: "inferred",
+      airline_brand: "unknown",
       hotel_required: "inferred",
       hotel_star_rating: "unknown",
       hotel_brand: "unknown",
@@ -194,6 +196,7 @@ function normalizeStateSnapshot(raw) {
   next.class = ["economy", "premium_economy", "business", "first"].includes(klass)
     ? klass
     : "economy";
+  next.airline_brand = normalizeWhitespace(next.airline_brand || "") || null;
 
   const hotel = String(next.hotel_required || "no").toLowerCase();
   next.hotel_required = ["yes", "no"].includes(hotel) ? hotel : "no";
@@ -263,12 +266,52 @@ function extractHotelBrandFromText(text) {
   return normalizeWhitespace(exactMatch[1]);
 }
 
+function extractAirlineBrandFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  const clearPattern =
+    /\b(any airline|any carrier|no airline preference|without airline filter|remove airline filter|clear airline filter|all airlines)\b|\b(clear|remove)\b.*\b(airline|carrier)\b.*\b(filter|preference)\b/;
+  if (clearPattern.test(value)) return "";
+
+  const exactMatch =
+    value.match(/\bi only want\s+([a-z0-9&.' -]{2,50})$/) ||
+    value.match(/\bi want only\s+([a-z0-9&.' -]{2,50})$/) ||
+    value.match(/\bonly show me\s+([a-z0-9&.' -]{2,50})$/) ||
+    value.match(/\bshow me only\s+([a-z0-9&.' -]{2,50})$/) ||
+    value.match(/\bonly\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)\b/) ||
+    value.match(/\bshow\s+([a-z0-9&.' -]{2,50})\s+flights\b/) ||
+    value.match(/\b([a-z0-9&.' -]{2,50})\s+only\b/);
+
+  if (!exactMatch?.[1]) return null;
+
+  const candidate = normalizeWhitespace(exactMatch[1])
+    .replace(/\b(flights?|airlines?|carrier|carriers)\b/gi, "")
+    .replace(/\b(please|pls)\b/gi, "")
+    .trim();
+  if (!candidate) return null;
+
+  const blocked = new Set([
+    "direct",
+    "non stop",
+    "non-stop",
+    "cheapest",
+    "cheap",
+    "business class",
+    "first class",
+    "premium economy",
+    "economy",
+  ]);
+
+  return blocked.has(candidate.toLowerCase()) ? null : candidate;
+}
+
 function detectIntent(history) {
   const latest = getLatestUserMessage(history).toLowerCase();
 
   if (/\b(compare|comparison|which is better)\b/.test(latest)) return "compare_request";
   if (/\b(replan|change|update|modify|switch|instead)\b/.test(latest)) return "modify_constraint";
-  if (/\bfrom\b|\bto\b|\bclass\b|\bdirect\b|\bhotel\b|\bdate\b/.test(latest)) return "clarification_answer";
+  if (/\bfrom\b|\bto\b|\bclass\b|\bdirect\b|\bhotel\b|\bdate\b|\bairline\b|\bcarrier\b/.test(latest)) return "clarification_answer";
   return "new_search";
 }
 
@@ -347,6 +390,13 @@ function applyRuleOverrides(state, history, preferences) {
     setSlot(state, "hotel_required", "yes", "confirmed");
     setSlot(state, "hotel_brand", requestedBrand, "confirmed");
   }
+
+  const requestedAirline = extractAirlineBrandFromText(latest);
+  if (requestedAirline === "") {
+    clearSlot(state, "airline_brand");
+  } else if (requestedAirline) {
+    setSlot(state, "airline_brand", requestedAirline, "confirmed");
+  }
 }
 
 function buildSystemPrompt(todayIso, currentState) {
@@ -367,6 +417,7 @@ Return only JSON with keys:
   "departure_date": string|null,
   "return_date": string|null,
   "class": string|null,
+  "airline_brand": string|null,
   "hotel_required": boolean|string|null,
   "hotel_star_rating": number|null,
   "hotel_brand": string|null,
@@ -413,6 +464,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   const departureDate = normalizeDate(parsedUpdate?.departure_date, corpus);
   const returnDate = normalizeDate(parsedUpdate?.return_date, corpus);
   const klass = normalizeCabinClass(parsedUpdate?.class, preferences);
+  const parsedAirlineBrand = normalizeWhitespace(parsedUpdate?.airline_brand || "") || null;
   const hotelRequired = normalizeHotelRequired(parsedUpdate?.hotel_required);
   const parsedHotelBrand = normalizeWhitespace(parsedUpdate?.hotel_brand || "") || null;
 
@@ -428,6 +480,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   if (departureDate) setSlot(next, "departure_date", departureDate, "inferred");
   if (returnDate) setSlot(next, "return_date", returnDate, "inferred");
   if (klass) setSlot(next, "class", klass, "inferred");
+  if (parsedAirlineBrand) setSlot(next, "airline_brand", parsedAirlineBrand, "inferred");
   if (hotelRequired) setSlot(next, "hotel_required", hotelRequired, "inferred");
   if (parsedHotelBrand) setSlot(next, "hotel_brand", parsedHotelBrand, "inferred");
 
@@ -676,6 +729,19 @@ function mapCabinClassToSerpValue(cabinClass) {
   return "";
 }
 
+function matchesAirlineBrand(flight, requestedAirline) {
+  if (!requestedAirline) return true;
+
+  const needle = normalizeWhitespace(requestedAirline).toLowerCase();
+  if (!needle) return true;
+
+  const labels = [flight?.airline, ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : [])]
+    .map((value) => normalizeWhitespace(value || "").toLowerCase())
+    .filter(Boolean);
+
+  return labels.some((label) => label.includes(needle));
+}
+
 async function fetchFlights(origin, destination, state) {
   const params = new URLSearchParams({
     engine: "google_flights",
@@ -735,7 +801,11 @@ async function fetchFlights(origin, destination, state) {
     };
   });
 
-  const ranked = rankFlights(normalized, state);
+  const airlineFiltered = state.airline_brand
+    ? normalized.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
+    : normalized;
+
+  const ranked = rankFlights(airlineFiltered, state);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
     if (directOnly.length > 0) return directOnly.slice(0, 5);
@@ -894,6 +964,10 @@ function buildActions(state) {
     actions.push("Add hotels");
   }
 
+  if (state.airline_brand) {
+    actions.push("Clear airline filter");
+  }
+
   return actions;
 }
 
@@ -901,6 +975,7 @@ function formatStateValue(key, value) {
   if (value == null) return "cleared";
   if (key === "direct_only") return value ? "on" : "off";
   if (key === "hotel_required") return value === "yes" ? "enabled" : "disabled";
+  if (key === "airline_brand") return String(value);
   if (key === "hotel_brand") return String(value);
   return String(value);
 }
@@ -912,6 +987,7 @@ function getChangedSlots(previousState, nextState) {
     "departure_date",
     "return_date",
     "class",
+    "airline_brand",
     "hotel_required",
     "hotel_star_rating",
     "hotel_brand",
@@ -936,6 +1012,7 @@ function buildUpdateSummary(previousState, nextState) {
     departure_date: "departure",
     return_date: "return",
     class: "cabin",
+    airline_brand: "airline",
     hotel_required: "hotels",
     hotel_star_rating: "hotel stars",
     hotel_brand: "hotel brand",

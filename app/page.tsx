@@ -36,6 +36,7 @@ type TripState = {
   departure_date?: string | null;
   return_date?: string | null;
   class?: string | null;
+  airline_brand?: string | null;
   hotel_required?: "yes" | "no" | null;
   hotel_star_rating?: number | null;
   direct_only?: boolean;
@@ -95,6 +96,7 @@ type EditableStateKey =
   | "destination_city"
   | "departure_date"
   | "class"
+  | "airline_brand"
   | "hotel_required"
   | "hotel_star_rating"
   | "direct_only"
@@ -127,9 +129,10 @@ function formatStateSummary(state: TripState | null): string {
   const destination = state.destination_city || "Destination not set";
   const date = state.departure_date || "Date not set";
   const cabin = state.class ? toTitleCase(state.class) : "Economy";
+  const airline = state.airline_brand || "Any airline";
   const hotels = state.hotel_required === "yes" ? "On" : "Off";
 
-  return `${source} -> ${destination} | ${date} | ${cabin} | Hotels: ${hotels}`;
+  return `${source} -> ${destination} | ${date} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
 }
 
 function toApiHistory(messages: ChatMessage[]): ApiHistoryMessage[] {
@@ -465,6 +468,7 @@ export default function Home() {
                     ["destination_city", stateSnapshot.destination_city || "Destination not set"],
                     ["departure_date", stateSnapshot.departure_date || "Date not set"],
                     ["class", stateSnapshot.class || "economy"],
+                    ["airline_brand", stateSnapshot.airline_brand || "any airline"],
                     ["hotel_required", stateSnapshot.hotel_required || "no"],
                     [
                       "hotel_star_rating",

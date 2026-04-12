@@ -342,14 +342,31 @@ function detectIntent(history) {
   return "new_search";
 }
 
-function normalizeCabinClass(value, preferences) {
+function normalizeCabinClass(value) {
   const input = String(value || "").toLowerCase();
 
   if (input.includes("premium")) return "premium_economy";
   if (input.includes("business")) return "business";
   if (input.includes("first")) return "first";
   if (input.includes("economy")) return "economy";
-  if (preferences.flightPremium) return "business";
+
+  return null;
+}
+
+function extractCabinClassFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  if (/\b(first\s*class|1st\s*class|switch to first|go first class|first class trip)\b/.test(value)) {
+    return "first";
+  }
+
+  if (/\b(business\s*class|switch to business|go business class|business trip)\b/.test(value)) {
+    return "business";
+  }
+
+  if (/\b(premium\s*economy)\b/.test(value)) return "premium_economy";
+  if (/\b(economy(\s*class)?)\b/.test(value)) return "economy";
 
   return null;
 }
@@ -385,8 +402,9 @@ function applyRuleOverrides(state, history, preferences) {
     setSlot(state, "budget_mode", "budget", "confirmed");
   }
 
-  if (preferences.flightPremium) {
-    setSlot(state, "class", "business", "confirmed");
+  const explicitCabinClass = extractCabinClassFromText(latest);
+  if (explicitCabinClass) {
+    setSlot(state, "class", explicitCabinClass, "confirmed");
   }
 
   if (preferences.hotelIntent) {
@@ -490,7 +508,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   const destination = normalizeWhitespace(parsedUpdate?.destination_city || "") || null;
   const departureDate = normalizeDate(parsedUpdate?.departure_date, corpus);
   const returnDate = normalizeDate(parsedUpdate?.return_date, corpus);
-  const klass = normalizeCabinClass(parsedUpdate?.class, preferences);
+  const klass = normalizeCabinClass(parsedUpdate?.class);
   const parsedAirlineBrand = normalizeWhitespace(parsedUpdate?.airline_brand || "") || null;
   const hotelRequired = normalizeHotelRequired(parsedUpdate?.hotel_required);
   const parsedHotelBrand = normalizeWhitespace(parsedUpdate?.hotel_brand || "") || null;
@@ -1239,7 +1257,8 @@ async function fetchHotels(state) {
     fetchHotelsFromBookingApi(state).catch(() => []),
   ]);
 
-  let hotels = dedupeHotels([...serpHotelsRaw, ...bookingHotelsRaw]);
+  const mergedHotels = dedupeHotels([...serpHotelsRaw, ...bookingHotelsRaw]);
+  let hotels = mergedHotels;
 
   if (state.hotel_star_rating) {
     hotels = hotels.filter((h) => meetsHotelStarConstraint(h, state.hotel_star_rating));
@@ -1249,7 +1268,35 @@ async function fetchHotels(state) {
     hotels = hotels.filter((h) => matchesHotelBrand(h, state.hotel_brand));
   }
 
-  return rankHotels(hotels, state).slice(0, 5);
+  if (hotels.length > 0) {
+    return {
+      hotels: rankHotels(hotels, state).slice(0, 5),
+      hotel_filter_relaxed: false,
+      hotel_relax_reason: null,
+    };
+  }
+
+  // If star filter is too restrictive, keep brand filter and relax only star rating.
+  if (state.hotel_star_rating) {
+    let relaxed = mergedHotels;
+    if (state.hotel_brand) {
+      relaxed = relaxed.filter((h) => matchesHotelBrand(h, state.hotel_brand));
+    }
+
+    if (relaxed.length > 0) {
+      return {
+        hotels: rankHotels(relaxed, state).slice(0, 5),
+        hotel_filter_relaxed: true,
+        hotel_relax_reason: "removed_hotel_star_rating",
+      };
+    }
+  }
+
+  return {
+    hotels: [],
+    hotel_filter_relaxed: false,
+    hotel_relax_reason: null,
+  };
 }
 
 function buildActions(state) {
@@ -1396,10 +1443,17 @@ export async function GET(request) {
 
     const hotelRequested = shouldRequestHotels(history, state);
 
-    const [flightResult, hotels] = await Promise.all([
+    const [flightResult, hotelResult] = await Promise.all([
       fetchFlights(sourceAirport.code, destinationAirport.code, state),
-      hotelRequested ? fetchHotels(state) : Promise.resolve([]),
+      hotelRequested
+        ? fetchHotels(state)
+        : Promise.resolve({
+            hotels: [],
+            hotel_filter_relaxed: false,
+            hotel_relax_reason: null,
+          }),
     ]);
+    const hotels = hotelResult.hotels;
 
     return json({
       type: "result",
@@ -1418,6 +1472,9 @@ export async function GET(request) {
         ranked_by: ["price", "duration", "stops", "hotel_quality"],
         hotel_requested: hotelRequested,
         hotel_count: hotels.length,
+        hotel_filter_relaxed: hotelResult.hotel_filter_relaxed,
+        hotel_relax_reason: hotelResult.hotel_relax_reason,
+        hotel_star_rating_active: Boolean(state.hotel_star_rating),
         direct_only_requested: state.direct_only,
         direct_only_available: flightResult.direct_only_available,
         direct_fallback_used: flightResult.direct_fallback_used,

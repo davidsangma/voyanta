@@ -70,6 +70,9 @@ type ResultResponse = {
   meta?: {
     hotel_requested?: boolean;
     hotel_count?: number;
+    hotel_filter_relaxed?: boolean;
+    hotel_relax_reason?: string | null;
+    hotel_star_rating_active?: boolean;
     ranked_by?: string[];
     direct_only_requested?: boolean;
     direct_only_available?: boolean | null;
@@ -638,6 +641,12 @@ export default function Home() {
                         {(message.data.hotels || []).length > 0 && (
                           <div>
                             <p className="font-semibold mb-2">Hotels</p>
+                            {message.data.meta?.hotel_filter_relaxed && (
+                              <p className="mb-2 text-sm text-[var(--text-secondary)]">
+                                No hotels matched your current star filter, so these are next best options without that
+                                star constraint.
+                              </p>
+                            )}
                             <div className="space-y-2">
                               {(message.data.hotels || []).slice(0, 3).map((hotel, i) => (
                                 <div key={i} className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] p-3 rounded-lg border border-[#dfc9bc]">
@@ -660,7 +669,10 @@ export default function Home() {
 
                         {message.data.meta?.hotel_requested && (message.data.hotels || []).length === 0 && (
                           <div className="mt-2 text-sm text-[var(--text-secondary)]">
-                            No hotel matches found for the current filters. Try asking for &quot;budget hotels&quot; or remove star rating constraints.
+                            No hotel matches found for the current filters.
+                            {message.data.meta?.hotel_star_rating_active
+                              ? " Try removing the hotel star filter."
+                              : " Try asking for budget hotels or clearing brand constraints."}
                           </div>
                         )}
 

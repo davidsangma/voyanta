@@ -71,6 +71,9 @@ type ResultResponse = {
     hotel_requested?: boolean;
     hotel_count?: number;
     ranked_by?: string[];
+    direct_only_requested?: boolean;
+    direct_only_available?: boolean | null;
+    direct_fallback_used?: boolean;
   };
 };
 
@@ -566,6 +569,12 @@ export default function Home() {
 
                         <div className="mb-4">
                           <p className="font-semibold mb-2">Flights</p>
+                          {message.data.meta?.direct_fallback_used && (
+                            <p className="mb-2 text-sm text-[var(--text-secondary)]">
+                              No direct flights are available for this route/date. Showing next best options with
+                              stops.
+                            </p>
+                          )}
                           <div className="space-y-2">
                             {(message.data.best_flights || []).slice(0, 3).map((flight, i) => (
                               <div

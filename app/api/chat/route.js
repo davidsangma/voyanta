@@ -964,10 +964,26 @@ async function fetchFlights(origin, destination, state) {
   const ranked = rankFlights(airlineFiltered, state);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
-    if (directOnly.length > 0) return directOnly.slice(0, 5);
+    if (directOnly.length > 0) {
+      return {
+        flights: directOnly.slice(0, 5),
+        direct_only_available: true,
+        direct_fallback_used: false,
+      };
+    }
+
+    return {
+      flights: ranked.slice(0, 5),
+      direct_only_available: false,
+      direct_fallback_used: true,
+    };
   }
 
-  return ranked.slice(0, 5);
+  return {
+    flights: ranked.slice(0, 5),
+    direct_only_available: null,
+    direct_fallback_used: false,
+  };
 }
 
 function rankHotels(hotels, state) {
@@ -1250,7 +1266,7 @@ export async function GET(request) {
 
     const hotelRequested = shouldRequestHotels(history, state);
 
-    const [bestFlights, hotels] = await Promise.all([
+    const [flightResult, hotels] = await Promise.all([
       fetchFlights(sourceAirport.code, destinationAirport.code, state),
       hotelRequested ? fetchHotels(state) : Promise.resolve([]),
     ]);
@@ -1264,7 +1280,7 @@ export async function GET(request) {
         source_airport: sourceAirport.code,
         destination_airport: destinationAirport.code,
       },
-      best_flights: bestFlights,
+      best_flights: flightResult.flights,
       hotels,
       state_snapshot: state,
       actions: buildActions(state),
@@ -1272,6 +1288,9 @@ export async function GET(request) {
         ranked_by: ["price", "duration", "stops", "hotel_quality"],
         hotel_requested: hotelRequested,
         hotel_count: hotels.length,
+        direct_only_requested: state.direct_only,
+        direct_only_available: flightResult.direct_only_available,
+        direct_fallback_used: flightResult.direct_fallback_used,
       },
     });
   } catch (error) {

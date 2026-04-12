@@ -263,7 +263,11 @@ function extractHotelBrandFromText(text) {
     value.match(/\b([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\s+only\b/);
 
   if (!exactMatch?.[1]) return null;
-  return normalizeWhitespace(exactMatch[1]);
+  const candidate = normalizeWhitespace(exactMatch[1])
+    .replace(/^(show|me|only|just)\s+/i, "")
+    .replace(/\s+(please|pls)$/i, "")
+    .trim();
+  return candidate || null;
 }
 
 function extractAirlineBrandFromText(text) {
@@ -275,21 +279,23 @@ function extractAirlineBrandFromText(text) {
   if (clearPattern.test(value)) return "";
 
   const exactMatch =
-    value.match(/\bi only want\s+([a-z0-9&.' -]{2,50})$/) ||
-    value.match(/\bi want only\s+([a-z0-9&.' -]{2,50})$/) ||
-    value.match(/\bonly show me\s+([a-z0-9&.' -]{2,50})$/) ||
-    value.match(/\bshow me only\s+([a-z0-9&.' -]{2,50})$/) ||
+    value.match(/\bi only want\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)\b/) ||
+    value.match(/\bi want only\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)\b/) ||
+    value.match(/\bonly show me\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)?\b/) ||
+    value.match(/\bshow me only\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)?\b/) ||
     value.match(/\bonly\s+([a-z0-9&.' -]{2,50})\s+(?:flights?|airlines?|carrier|carriers)\b/) ||
     value.match(/\bshow\s+([a-z0-9&.' -]{2,50})\s+flights\b/) ||
-    value.match(/\b([a-z0-9&.' -]{2,50})\s+only\b/);
+    value.match(/\b([a-z0-9&.' -]{2,50})\s+(?:airlines?|carriers?)\s+only\b/);
 
   if (!exactMatch?.[1]) return null;
 
   const candidate = normalizeWhitespace(exactMatch[1])
     .replace(/\b(flights?|airlines?|carrier|carriers)\b/gi, "")
     .replace(/\b(please|pls)\b/gi, "")
+    .replace(/^(show|me|only|just)\s+/i, "")
     .trim();
   if (!candidate) return null;
+  if (/\b(hotel|hotels|resort|stay|accommodation|room|lodging)\b/i.test(candidate)) return null;
 
   const blocked = new Set([
     "direct",
@@ -304,6 +310,17 @@ function extractAirlineBrandFromText(text) {
   ]);
 
   return blocked.has(candidate.toLowerCase()) ? null : candidate;
+}
+
+function simplifyBrandText(value) {
+  const cleaned = normalizeWhitespace(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Helps match common minor misspellings like "mariott" vs "marriott".
+  return cleaned.replace(/([a-z])\1+/g, "$1");
 }
 
 function detectIntent(history) {
@@ -732,11 +749,11 @@ function mapCabinClassToSerpValue(cabinClass) {
 function matchesAirlineBrand(flight, requestedAirline) {
   if (!requestedAirline) return true;
 
-  const needle = normalizeWhitespace(requestedAirline).toLowerCase();
+  const needle = simplifyBrandText(requestedAirline);
   if (!needle) return true;
 
   const labels = [flight?.airline, ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : [])]
-    .map((value) => normalizeWhitespace(value || "").toLowerCase())
+    .map((value) => simplifyBrandText(value || ""))
     .filter(Boolean);
 
   return labels.some((label) => label.includes(needle));
@@ -844,8 +861,8 @@ function rankHotels(hotels, state) {
 
 function matchesHotelBrand(hotel, requestedBrand) {
   if (!requestedBrand) return true;
-  const haystack = normalizeWhitespace(hotel?.name || "").toLowerCase();
-  const needle = normalizeWhitespace(requestedBrand).toLowerCase();
+  const haystack = simplifyBrandText(hotel?.name || "");
+  const needle = simplifyBrandText(requestedBrand);
   if (!haystack || !needle) return true;
   return haystack.includes(needle);
 }

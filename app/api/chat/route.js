@@ -162,6 +162,7 @@ function createDefaultState() {
     class: "economy",
     hotel_required: "no",
     hotel_star_rating: null,
+    hotel_brand: null,
     direct_only: false,
     budget_mode: "balanced",
     slot_status: {
@@ -172,6 +173,7 @@ function createDefaultState() {
       class: "inferred",
       hotel_required: "inferred",
       hotel_star_rating: "unknown",
+      hotel_brand: "unknown",
       direct_only: "inferred",
       budget_mode: "inferred",
     },
@@ -202,6 +204,7 @@ function normalizeStateSnapshot(raw) {
       : Number(next.hotel_star_rating);
 
   if (Number.isNaN(next.hotel_star_rating)) next.hotel_star_rating = null;
+  next.hotel_brand = normalizeWhitespace(next.hotel_brand || "") || null;
 
   next.direct_only = Boolean(next.direct_only);
   next.budget_mode = ["budget", "balanced", "luxury"].includes(next.budget_mode)
@@ -239,6 +242,25 @@ function extractStarRatingFromText(text) {
   if (/\b4\s*star\b|\bfour\s*star\b/.test(value)) return 4;
   if (/\b3\s*star\b|\bthree\s*star\b/.test(value)) return 3;
   return null;
+}
+
+function extractHotelBrandFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  const clearPattern =
+    /\b(any hotel|any brand|no brand|without brand|remove brand|clear brand|all hotels)\b|\b(clear|remove)\b.*\bhotel\b.*\bbrand\b/;
+  if (clearPattern.test(value)) return "";
+
+  const exactMatch =
+    value.match(/\bonly\s+([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\b/) ||
+    value.match(/\bi only want\s+([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\b/) ||
+    value.match(/\bi want\s+([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\b/) ||
+    value.match(/\bshow\s+([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\b/) ||
+    value.match(/\b([a-z0-9&.' -]{2,40}?)\s+(?:hotel|hotels|resort|resorts)\s+only\b/);
+
+  if (!exactMatch?.[1]) return null;
+  return normalizeWhitespace(exactMatch[1]);
 }
 
 function detectIntent(history) {
@@ -317,6 +339,14 @@ function applyRuleOverrides(state, history, preferences) {
       setSlot(state, "budget_mode", "luxury", "confirmed");
     }
   }
+
+  const requestedBrand = extractHotelBrandFromText(latest);
+  if (requestedBrand === "") {
+    clearSlot(state, "hotel_brand");
+  } else if (requestedBrand) {
+    setSlot(state, "hotel_required", "yes", "confirmed");
+    setSlot(state, "hotel_brand", requestedBrand, "confirmed");
+  }
 }
 
 function buildSystemPrompt(todayIso, currentState) {
@@ -339,6 +369,7 @@ Return only JSON with keys:
   "class": string|null,
   "hotel_required": boolean|string|null,
   "hotel_star_rating": number|null,
+  "hotel_brand": string|null,
   "direct_only": boolean|null,
   "budget_mode": "budget"|"balanced"|"luxury"|null
 }`;
@@ -383,6 +414,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   const returnDate = normalizeDate(parsedUpdate?.return_date, corpus);
   const klass = normalizeCabinClass(parsedUpdate?.class, preferences);
   const hotelRequired = normalizeHotelRequired(parsedUpdate?.hotel_required);
+  const parsedHotelBrand = normalizeWhitespace(parsedUpdate?.hotel_brand || "") || null;
 
   const parsedDirectOnly =
     typeof parsedUpdate?.direct_only === "boolean" ? parsedUpdate.direct_only : null;
@@ -397,6 +429,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   if (returnDate) setSlot(next, "return_date", returnDate, "inferred");
   if (klass) setSlot(next, "class", klass, "inferred");
   if (hotelRequired) setSlot(next, "hotel_required", hotelRequired, "inferred");
+  if (parsedHotelBrand) setSlot(next, "hotel_brand", parsedHotelBrand, "inferred");
 
   if (parsedUpdate?.hotel_star_rating != null && parsedUpdate?.hotel_star_rating !== "") {
     const stars = Number(parsedUpdate.hotel_star_rating);
@@ -410,6 +443,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
 
   if (next.hotel_required === "no") {
     clearSlot(next, "hotel_star_rating");
+    clearSlot(next, "hotel_brand");
   }
 
   return next;
@@ -738,6 +772,14 @@ function rankHotels(hotels, state) {
     });
 }
 
+function matchesHotelBrand(hotel, requestedBrand) {
+  if (!requestedBrand) return true;
+  const haystack = normalizeWhitespace(hotel?.name || "").toLowerCase();
+  const needle = normalizeWhitespace(requestedBrand).toLowerCase();
+  if (!haystack || !needle) return true;
+  return haystack.includes(needle);
+}
+
 function shouldRequestHotels(history, state) {
   if (state.hotel_required === "yes") return true;
   const latest = getLatestUserMessage(history).toLowerCase();
@@ -831,6 +873,10 @@ async function fetchHotels(state) {
     hotels = hotels.filter((h) => meetsHotelStarConstraint(h, state.hotel_star_rating));
   }
 
+  if (state.hotel_brand) {
+    hotels = hotels.filter((h) => matchesHotelBrand(h, state.hotel_brand));
+  }
+
   return rankHotels(hotels, state).slice(0, 5);
 }
 
@@ -843,6 +889,7 @@ function buildActions(state) {
 
   if (state.hotel_required === "yes") {
     actions.push("Remove hotel star filter");
+    if (state.hotel_brand) actions.push("Clear hotel brand filter");
   } else {
     actions.push("Add hotels");
   }
@@ -854,6 +901,7 @@ function formatStateValue(key, value) {
   if (value == null) return "cleared";
   if (key === "direct_only") return value ? "on" : "off";
   if (key === "hotel_required") return value === "yes" ? "enabled" : "disabled";
+  if (key === "hotel_brand") return String(value);
   return String(value);
 }
 
@@ -866,6 +914,7 @@ function getChangedSlots(previousState, nextState) {
     "class",
     "hotel_required",
     "hotel_star_rating",
+    "hotel_brand",
     "direct_only",
     "budget_mode",
   ];
@@ -889,6 +938,7 @@ function buildUpdateSummary(previousState, nextState) {
     class: "cabin",
     hotel_required: "hotels",
     hotel_star_rating: "hotel stars",
+    hotel_brand: "hotel brand",
     direct_only: "direct flights",
     budget_mode: "budget mode",
   };

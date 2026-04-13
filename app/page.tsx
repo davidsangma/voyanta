@@ -21,6 +21,11 @@ type Flight = {
   stops: number;
   stops_label?: string;
   departure_time?: string;
+  arrival_time?: string;
+  onward_price?: string;
+  onward_price_value?: number | null;
+  return_price?: string;
+  return_price_value?: number | null;
   return_departure_time?: string;
   return_arrival_time?: string;
   return_origin?: string;
@@ -44,6 +49,7 @@ type TravelPackage = {
   flight: Flight;
   hotel: Hotel;
   total_price: string;
+  nights?: number;
   saving_hint?: string;
 };
 
@@ -630,6 +636,11 @@ export default function Home() {
                               <div className="mb-4">
                                 <p className="font-semibold mb-2">Your Package</p>
                                 <p className="text-sm text-[var(--text-secondary)] mb-2">{pkg.saving_hint || ""}</p>
+                                {pkg.nights && (
+                                  <p className="text-sm text-[var(--text-secondary)] mb-2">
+                                    Stay duration: {pkg.nights} night(s)
+                                  </p>
+                                )}
 
                                 <div className="space-y-2">
                                   <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
@@ -656,7 +667,7 @@ export default function Home() {
                                         ? pkg.flight.outbound_flight_numbers.join(", ")
                                         : pkg.flight.flight_number || "N/A"}
                                     </p>
-                                    <p className="font-semibold">{pkg.flight.price}</p>
+                                    <p className="font-semibold">{pkg.flight.onward_price || pkg.flight.price}</p>
                                   </div>
 
                                   <div className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] p-3 rounded-lg border border-[#dfc9bc]">
@@ -697,7 +708,7 @@ export default function Home() {
                                         ? pkg.flight.return_flight_numbers.join(", ")
                                         : "N/A"}
                                     </p>
-                                    <p className="font-semibold">{pkg.flight.price}</p>
+                                    <p className="font-semibold">{pkg.flight.return_price || "N/A"}</p>
                                   </div>
                                 </div>
 

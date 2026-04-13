@@ -1122,6 +1122,20 @@ function parseCurrencyCodeFromPrice(price) {
   return match?.[1] || "INR";
 }
 
+function formatPriceInInr(value) {
+  if (!Number.isFinite(value)) return "N/A";
+  return `${Math.round(value)} INR`;
+}
+
+function getStayNights(state) {
+  if (!state?.departure_date || !state?.return_date) return 1;
+  const start = new Date(state.departure_date);
+  const end = new Date(state.return_date);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 1;
+  const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(1, diffDays);
+}
+
 function mapCabinClassToSerpValue(cabinClass) {
   const normalized = String(cabinClass || "").toLowerCase().trim();
   if (normalized === "economy") return "1";
@@ -1148,12 +1162,12 @@ function matchesAirlineBrand(flight, requestedAirline) {
   return labels.some((label) => label.includes(needle));
 }
 
-async function fetchFlights(origin, destination, state) {
+async function fetchSerpFlightsOneWay(origin, destination, departureDate, state) {
   const params = new URLSearchParams({
     engine: "google_flights",
     departure_id: origin,
     arrival_id: destination,
-    outbound_date: state.departure_date,
+    outbound_date: departureDate,
     adults: "1",
     currency: "INR",
     hl: "en",
@@ -1164,46 +1178,26 @@ async function fetchFlights(origin, destination, state) {
   const travelClass = mapCabinClassToSerpValue(state.class);
   if (travelClass) params.set("travel_class", travelClass);
 
-  if (state.return_date) {
-    params.set("type", "1");
-    params.set("return_date", state.return_date);
-  } else {
-    params.set("type", "2");
-  }
+  params.set("type", "2");
 
   const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-  if (!res.ok) {
-    return {
-      flights: [],
-      direct_only_available: null,
-      direct_fallback_used: false,
-    };
-  }
+  if (!res.ok) return [];
 
   const data = await res.json();
   const sourceFlights = data?.best_flights || data?.other_flights || [];
 
   const normalized = sourceFlights.slice(0, 15).map((flight) => {
     const segments = flight?.flights || [];
-    const returnSegments = flight?.return_flights || [];
     const first = segments[0];
     const last = segments[segments.length - 1];
     const allFlightLabels = collectFlightLabels(flight);
     const outboundFlightLabels = collectSegmentLabels(segments);
-    const returnFlightLabels = collectSegmentLabels(returnSegments);
 
     const duration = Number(flight?.total_duration) || null;
     const priceValue = parsePrice(flight?.price);
     const stops = Math.max(0, segments.length - 1);
     const flightNumber = allFlightLabels[0] || "N/A";
     const departureTime = first?.departure_airport?.time || first?.departure_time || "N/A";
-    const returnFirst = returnSegments[0];
-    const returnLast = returnSegments[returnSegments.length - 1];
-    const returnDepartureTime =
-      returnFirst?.departure_airport?.time || returnFirst?.departure_time || "N/A";
-    const returnArrivalTime = returnLast?.arrival_airport?.time || returnLast?.arrival_time || "N/A";
-    const returnOrigin = returnFirst?.departure_airport?.id || destination;
-    const returnDestination = returnLast?.arrival_airport?.id || origin;
 
     return {
       airline: first?.airline || "Unknown",
@@ -1211,50 +1205,128 @@ async function fetchFlights(origin, destination, state) {
       price: priceValue != null ? `${priceValue} INR` : "N/A",
       price_value: priceValue,
       cabin_class: state.class || "economy",
-      trip_type: state.return_date ? "round_trip" : "one_way",
+      trip_type: "one_way",
       duration: duration != null ? formatDurationMinutes(duration) : "N/A",
       duration_value: duration,
       origin: first?.departure_airport?.id || origin,
       destination: last?.arrival_airport?.id || destination,
       departure_time: departureTime,
+      arrival_time: last?.arrival_airport?.time || last?.arrival_time || "N/A",
       flight_number: flightNumber,
       flight_numbers: allFlightLabels,
       outbound_flight_numbers: outboundFlightLabels,
-      return_flight_numbers: returnFlightLabels,
-      return_departure_time: returnDepartureTime,
-      return_arrival_time: returnArrivalTime,
-      return_origin: returnOrigin,
-      return_destination: returnDestination,
+      onward_price: priceValue != null ? `${priceValue} INR` : "N/A",
+      onward_price_value: priceValue,
+      return_price: "N/A",
+      return_price_value: null,
+      return_flight_numbers: [],
+      return_departure_time: "N/A",
+      return_arrival_time: "N/A",
+      return_origin: destination,
+      return_destination: origin,
       stops,
       stops_label: formatStopsLabel(stops),
     };
   });
 
-  const enrichedFlights = await enrichFlightsWithDuffel(normalized);
+  return normalized;
+}
+
+async function fetchFlights(origin, destination, state) {
+  const outboundRaw = await fetchSerpFlightsOneWay(origin, destination, state.departure_date, state).catch(
+    () => []
+  );
+
+  let returnRaw = [];
+  if (state.return_date) {
+    returnRaw = await fetchSerpFlightsOneWay(destination, origin, state.return_date, state).catch(() => []);
+  }
+
+  const enrichedOutbound = await enrichFlightsWithDuffel(outboundRaw);
+  const enrichedReturn = await enrichFlightsWithDuffel(returnRaw);
   const airlineFiltered = state.airline_brand
-    ? enrichedFlights.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
-    : enrichedFlights;
+    ? enrichedOutbound.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
+    : enrichedOutbound;
+
+  const returnAirlineFiltered =
+    state.airline_brand && enrichedReturn.length > 0
+      ? enrichedReturn.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
+      : enrichedReturn;
 
   const ranked = rankFlights(airlineFiltered, state);
+  const rankedReturn = rankFlights(returnAirlineFiltered, state);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
+    const baseOutbound = directOnly.length > 0 ? directOnly.slice(0, 5) : ranked.slice(0, 5);
+    const returnBase =
+      rankedReturn.length > 0
+        ? (() => {
+            const directReturn = rankedReturn.filter((f) => f.stops === 0);
+            return directReturn.length > 0 ? directReturn : rankedReturn;
+          })()
+        : [];
+
+    const combined = baseOutbound.map((outbound, index) => {
+      const ret = returnBase.length > 0 ? returnBase[index % returnBase.length] : null;
+      const onward = outbound.price_value;
+      const retPrice = ret?.price_value ?? null;
+      const total = Number.isFinite(onward) && Number.isFinite(retPrice) ? onward + retPrice : onward ?? null;
+
+      return {
+        ...outbound,
+        trip_type: state.return_date ? "round_trip" : "one_way",
+        price: total != null ? formatPriceInInr(total) : outbound.price,
+        price_value: total != null ? total : outbound.price_value,
+        return_price: ret?.price || "N/A",
+        return_price_value: retPrice,
+        return_origin: ret?.origin || destination,
+        return_destination: ret?.destination || origin,
+        return_departure_time: ret?.departure_time || "N/A",
+        return_arrival_time: ret?.arrival_time || "N/A",
+        return_flight_numbers: ret?.flight_numbers || [],
+      };
+    });
+
     if (directOnly.length > 0) {
       return {
-        flights: directOnly.slice(0, 5),
+        flights: combined,
         direct_only_available: true,
         direct_fallback_used: false,
       };
     }
 
     return {
-      flights: ranked.slice(0, 5),
+      flights: combined,
       direct_only_available: false,
       direct_fallback_used: true,
     };
   }
 
+  const baseOutbound = ranked.slice(0, 5);
+  const returnBase = rankedReturn.length > 0 ? rankedReturn : [];
+  const combined = baseOutbound.map((outbound, index) => {
+    const ret = returnBase.length > 0 ? returnBase[index % returnBase.length] : null;
+    const onward = outbound.price_value;
+    const retPrice = ret?.price_value ?? null;
+    const total = Number.isFinite(onward) && Number.isFinite(retPrice) ? onward + retPrice : onward ?? null;
+
+    return {
+      ...outbound,
+      trip_type: state.return_date ? "round_trip" : "one_way",
+      price: total != null ? formatPriceInInr(total) : outbound.price,
+      price_value: total != null ? total : outbound.price_value,
+      return_price: ret?.price || "N/A",
+      return_price_value: retPrice,
+      return_origin: ret?.origin || destination,
+      return_destination: ret?.destination || origin,
+      return_departure_time: ret?.departure_time || "N/A",
+      return_arrival_time: ret?.arrival_time || "N/A",
+      return_flight_numbers: ret?.flight_numbers || [],
+    };
+  });
+
   return {
-    flights: ranked.slice(0, 5),
+    flights: combined,
     direct_only_available: null,
     direct_fallback_used: false,
   };
@@ -1288,21 +1360,26 @@ function rankHotels(hotels, state) {
     });
 }
 
-function buildPackages(flights, hotels) {
+function buildPackages(flights, hotels, state) {
   if (!Array.isArray(flights) || !Array.isArray(hotels) || flights.length === 0 || hotels.length === 0) {
     return [];
   }
 
   const topFlights = flights.slice(0, 3);
   const topHotels = hotels.slice(0, 3);
+  const nights = getStayNights(state);
   const packages = [];
 
   for (let i = 0; i < Math.min(topFlights.length, topHotels.length); i += 1) {
     const flight = topFlights[i];
     const hotel = topHotels[i];
-    const flightPrice = typeof flight?.price_value === "number" ? flight.price_value : null;
-    const hotelPrice = typeof hotel?.price_value === "number" ? hotel.price_value : null;
-    const total = flightPrice != null && hotelPrice != null ? flightPrice + hotelPrice : null;
+    const onwardPrice = typeof flight?.onward_price_value === "number" ? flight.onward_price_value : null;
+    const returnPrice = typeof flight?.return_price_value === "number" ? flight.return_price_value : null;
+    const hotelNightly = typeof hotel?.price_value === "number" ? hotel.price_value : null;
+    const total =
+      onwardPrice != null && returnPrice != null && hotelNightly != null
+        ? onwardPrice + returnPrice + hotelNightly * nights
+        : null;
     const currency = parseCurrencyCodeFromPrice(flight?.price || hotel?.price || "INR");
 
     packages.push({
@@ -1312,6 +1389,7 @@ function buildPackages(flights, hotels) {
       hotel,
       total_price: total != null ? `${Math.round(total)} ${currency}` : "N/A",
       total_price_value: total,
+      nights,
       saving_hint:
         i === 0 ? "Balanced on price and quality" : i === 1 ? "Comfort-focused pick" : "Higher comfort option",
     });
@@ -1485,13 +1563,14 @@ async function fetchBookingDestination(destinationCity) {
   return { dest_id: String(best.dest_id), search_type: String(best.search_type) };
 }
 
-function mapBookingHotels(rawHotels) {
+function mapBookingHotels(rawHotels, nights = 1) {
   if (!Array.isArray(rawHotels)) return [];
 
   return rawHotels.slice(0, 20).map((entry) => {
     const property = entry?.property || {};
     const name = normalizeWhitespace(property?.name || "");
-    const priceValue = parsePrice(property?.priceBreakdown?.grossPrice?.value);
+    const gross = parsePrice(property?.priceBreakdown?.grossPrice?.value);
+    const perNight = gross != null ? gross / Math.max(1, nights) : null;
     const currency = normalizeWhitespace(property?.priceBreakdown?.grossPrice?.currency || "INR") || "INR";
     const fallbackLink = name
       ? `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(name)}`
@@ -1501,8 +1580,8 @@ function mapBookingHotels(rawHotels) {
       name: name || "Unknown",
       rating: typeof property?.reviewScore === "number" ? property.reviewScore : null,
       hotel_class: parseHotelClass(property?.accuratePropertyClass ?? property?.propertyClass ?? null),
-      price: priceValue != null ? `${priceValue} ${currency}` : "N/A",
-      price_value: priceValue,
+      price: perNight != null ? `${Math.round(perNight)} ${currency}/night` : "N/A",
+      price_value: perNight,
       link: property?.url || property?.hotelUrl || fallbackLink,
     };
   });
@@ -1543,7 +1622,7 @@ async function fetchHotelsFromBookingApi(state) {
   const data = await res.json().catch(() => ({}));
   const hotels = Array.isArray(data?.data?.hotels) ? data.data.hotels : [];
 
-  return mapBookingHotels(hotels).filter((h) => h.name && h.name !== "Unknown");
+  return mapBookingHotels(hotels, getStayNights(state)).filter((h) => h.name && h.name !== "Unknown");
 }
 
 async function fetchHotels(state) {
@@ -1772,7 +1851,7 @@ export async function GET(request) {
           }),
     ]);
     const hotels = hotelResult.hotels;
-    const packages = buildPackages(flightResult.flights, hotels);
+    const packages = buildPackages(flightResult.flights, hotels, state);
 
     return json({
       type: "result",

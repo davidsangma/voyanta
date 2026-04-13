@@ -170,6 +170,7 @@ function createDefaultState() {
     departure_date: null,
     return_date: null,
     trip_type: null,
+    package_required: null,
     class: "economy",
     airline_brand: null,
     hotel_required: "no",
@@ -183,6 +184,7 @@ function createDefaultState() {
       departure_date: "unknown",
       return_date: "unknown",
       trip_type: "unknown",
+      package_required: "unknown",
       class: "inferred",
       airline_brand: "unknown",
       hotel_required: "inferred",
@@ -204,6 +206,8 @@ function normalizeStateSnapshot(raw) {
   next.departure_date = normalizeDate(next.departure_date);
   next.return_date = normalizeDate(next.return_date);
   next.trip_type = ["one_way", "round_trip"].includes(next.trip_type) ? next.trip_type : null;
+  const packageRequired = String(next.package_required || "").toLowerCase();
+  next.package_required = ["yes", "no"].includes(packageRequired) ? packageRequired : null;
 
   const klass = String(next.class || "economy").toLowerCase();
   next.class = ["economy", "premium_economy", "business", "first"].includes(klass)
@@ -439,6 +443,14 @@ function normalizeTripType(value) {
   return null;
 }
 
+function normalizePackageRequired(value) {
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  const input = String(value || "").toLowerCase().trim();
+  if (["yes", "true", "required", "need", "include", "package"].includes(input)) return "yes";
+  if (["no", "false", "skip", "not required", "no package"].includes(input)) return "no";
+  return null;
+}
+
 function extractTripTypeFromText(text) {
   const value = String(text || "").toLowerCase();
   if (!value) return null;
@@ -446,6 +458,25 @@ function extractTripTypeFromText(text) {
   if (/\b(one[- ]?way|single trip|flight only|only onward)\b/.test(value)) return "one_way";
   if (/\b(round[- ]?trip|return trip|two way|with return|come back|return on|back on)\b/.test(value)) {
     return "round_trip";
+  }
+
+  return null;
+}
+
+function extractPackageRequiredFromText(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return null;
+
+  if (
+    /\b(package|bundle|flight\s*\+\s*hotel|flight and hotel|complete itinerary|full itinerary)\b/.test(
+      value
+    )
+  ) {
+    return "yes";
+  }
+
+  if (/\b(no package|without package|flights only|only flights|just flight)\b/.test(value)) {
+    return "no";
   }
 
   return null;
@@ -491,6 +522,11 @@ function applyRuleOverrides(state, history, preferences) {
   if (explicitTripType) {
     setSlot(state, "trip_type", explicitTripType, "confirmed");
     if (explicitTripType === "one_way") clearSlot(state, "return_date");
+  }
+
+  const explicitPackageRequired = extractPackageRequiredFromText(latest);
+  if (explicitPackageRequired) {
+    setSlot(state, "package_required", explicitPackageRequired, "confirmed");
   }
 
   const explicitHotelRequired = extractHotelRequiredFromText(latest);
@@ -548,6 +584,7 @@ Return only JSON with keys:
   "departure_date": string|null,
   "return_date": string|null,
   "trip_type": "one_way"|"round_trip"|null,
+  "package_required": "yes"|"no"|null,
   "class": string|null,
   "airline_brand": string|null,
   "hotel_required": boolean|string|null,
@@ -596,6 +633,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   const departureDate = normalizeDate(parsedUpdate?.departure_date, corpus);
   const returnDate = normalizeDate(parsedUpdate?.return_date, corpus);
   const parsedTripType = normalizeTripType(parsedUpdate?.trip_type);
+  const parsedPackageRequired = normalizePackageRequired(parsedUpdate?.package_required);
   const klass = normalizeCabinClass(parsedUpdate?.class);
   const parsedAirlineBrand = normalizeWhitespace(parsedUpdate?.airline_brand || "") || null;
   const hotelRequired = normalizeHotelRequired(parsedUpdate?.hotel_required);
@@ -613,6 +651,7 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   if (departureDate) setSlot(next, "departure_date", departureDate, "inferred");
   if (returnDate) setSlot(next, "return_date", returnDate, "inferred");
   if (parsedTripType) setSlot(next, "trip_type", parsedTripType, "inferred");
+  if (parsedPackageRequired) setSlot(next, "package_required", parsedPackageRequired, "inferred");
   if (klass) setSlot(next, "class", klass, "inferred");
   if (parsedAirlineBrand) setSlot(next, "airline_brand", parsedAirlineBrand, "inferred");
   if (hotelRequired) setSlot(next, "hotel_required", hotelRequired, "inferred");
@@ -634,6 +673,9 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
 
   if (next.trip_type === "one_way") {
     clearSlot(next, "return_date");
+    if (next.package_required == null) {
+      setSlot(next, "package_required", "no", "inferred");
+    }
   }
 
   // Default stay recommendations for round trips unless user explicitly says no hotels.
@@ -658,6 +700,10 @@ function validateState(state) {
 
   if (missing.length === 0 && state.trip_type === "round_trip" && !state.return_date) {
     missing.push("return_date");
+  }
+
+  if (missing.length === 0 && state.trip_type === "round_trip" && !state.package_required) {
+    missing.push("package_required");
   }
 
   return { missing };
@@ -688,6 +734,10 @@ function buildFollowUpQuestion(missing, state) {
 
   if (field === "return_date") {
     return "What is your return date? (e.g., next Sunday or YYYY-MM-DD)";
+  }
+
+  if (field === "package_required") {
+    return "Would you like me to create a complete package (outbound flight + hotel stay + return flight)?";
   }
 
   return "Could you share a bit more detail?";
@@ -1233,6 +1283,8 @@ function matchesHotelBrand(hotel, requestedBrand) {
 }
 
 function shouldRequestHotels(history, state) {
+  if (state.trip_type === "round_trip" && state.hotel_required !== "no") return true;
+  if (state.package_required === "yes") return true;
   if (state.hotel_required === "yes") return true;
   const latest = getLatestUserMessage(history).toLowerCase();
   return /\b(hotel|hotels|accommodation|accomodation|stay|room|resort|lodging)\b/.test(latest);
@@ -1516,6 +1568,7 @@ function formatStateValue(key, value) {
   if (value == null) return "cleared";
   if (key === "direct_only") return value ? "on" : "off";
   if (key === "hotel_required") return value === "yes" ? "enabled" : "disabled";
+  if (key === "package_required") return value === "yes" ? "enabled" : "disabled";
   if (key === "airline_brand") return String(value);
   if (key === "hotel_brand") return String(value);
   return String(value);
@@ -1528,6 +1581,7 @@ function getChangedSlots(previousState, nextState) {
     "departure_date",
     "return_date",
     "trip_type",
+    "package_required",
     "class",
     "airline_brand",
     "hotel_required",
@@ -1554,6 +1608,7 @@ function buildUpdateSummary(previousState, nextState) {
     departure_date: "departure",
     return_date: "return",
     trip_type: "trip type",
+    package_required: "package",
     class: "cabin",
     airline_brand: "airline",
     hotel_required: "hotels",
@@ -1666,6 +1721,7 @@ export async function GET(request) {
       actions: buildActions(state),
       meta: {
         ranked_by: ["price", "duration", "stops", "hotel_quality"],
+        package_requested: state.package_required === "yes",
         hotel_requested: hotelRequested,
         hotel_count: hotels.length,
         package_count: packages.length,

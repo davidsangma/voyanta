@@ -53,6 +53,7 @@ type TripState = {
   departure_date?: string | null;
   return_date?: string | null;
   trip_type?: "one_way" | "round_trip" | null;
+  package_required?: "yes" | "no" | null;
   class?: string | null;
   airline_brand?: string | null;
   hotel_required?: "yes" | "no" | null;
@@ -91,6 +92,7 @@ type ResultResponse = {
     hotel_relax_reason?: string | null;
     hotel_star_rating_active?: boolean;
     package_count?: number;
+    package_requested?: boolean;
     ranked_by?: string[];
     direct_only_requested?: boolean;
     direct_only_available?: boolean | null;
@@ -123,6 +125,7 @@ type EditableStateKey =
   | "departure_date"
   | "return_date"
   | "trip_type"
+  | "package_required"
   | "class"
   | "airline_brand"
   | "hotel_required"
@@ -157,11 +160,13 @@ function formatStateSummary(state: TripState | null): string {
   const destination = state.destination_city || "Destination not set";
   const date = state.departure_date || "Date not set";
   const tripType = state.trip_type ? toTitleCase(state.trip_type) : "Trip type not set";
+  const packageMode =
+    state.package_required === "yes" ? "On" : state.package_required === "no" ? "Off" : "Not set";
   const cabin = state.class ? toTitleCase(state.class) : "Economy";
   const airline = state.airline_brand || "Any airline";
   const hotels = state.hotel_required === "yes" ? "On" : "Off";
 
-  return `${source} -> ${destination} | ${date} | ${tripType} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
+  return `${source} -> ${destination} | ${date} | ${tripType} | Package: ${packageMode} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
 }
 
 function toApiHistory(messages: ChatMessage[]): ApiHistoryMessage[] {
@@ -391,6 +396,16 @@ export default function Home() {
       return;
     }
 
+    if (key === "package_required") {
+      next.package_required = next.package_required === "yes" ? "no" : "yes";
+      setStateSnapshot(next);
+      await submitTurn(
+        next.package_required === "yes" ? "Create a package" : "Do not create a package",
+        next
+      );
+      return;
+    }
+
     if (key === "budget_mode") {
       const order: Array<TripState["budget_mode"]> = ["budget", "balanced", "luxury"];
       const idx = Math.max(0, order.indexOf(next.budget_mode || "balanced"));
@@ -509,6 +524,7 @@ export default function Home() {
                     ["departure_date", stateSnapshot.departure_date || "Date not set"],
                     ["return_date", stateSnapshot.return_date || "Not set"],
                     ["trip_type", stateSnapshot.trip_type || "not set"],
+                    ["package_required", stateSnapshot.package_required || "not set"],
                     ["class", stateSnapshot.class || "economy"],
                     ["airline_brand", stateSnapshot.airline_brand || "any airline"],
                     ["hotel_required", stateSnapshot.hotel_required || "no"],
@@ -604,7 +620,52 @@ export default function Home() {
                           <p className="text-xs text-[var(--text-secondary)] mb-3">{message.data.update_summary}</p>
                         )}
 
-                        {(message.data.packages || []).length > 0 && (
+                        {message.data.meta?.package_requested &&
+                          (message.data.packages || []).length > 0 &&
+                          (() => {
+                            const pkg = (message.data.packages || [])[0];
+                            if (!pkg) return null;
+                            return (
+                              <div className="mb-4">
+                                <p className="font-semibold mb-2">Your Package</p>
+                                <div className="bg-[linear-gradient(160deg,#f5f8ff,#eef3ff)] p-3 rounded-lg border border-[#cfd8f1] space-y-2">
+                                  <p className="font-semibold">{pkg.title}</p>
+                                  <p className="text-sm text-[var(--text-secondary)]">{pkg.saving_hint || ""}</p>
+                                  <p className="text-sm font-semibold">Ongoing Flight</p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {pkg.flight.origin} -&gt; {pkg.flight.destination} | Departs:{" "}
+                                    {pkg.flight.departure_time || "N/A"}
+                                  </p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {Array.isArray(pkg.flight.outbound_flight_numbers) &&
+                                    pkg.flight.outbound_flight_numbers.length > 0
+                                      ? pkg.flight.outbound_flight_numbers.join(", ")
+                                      : pkg.flight.flight_number || "N/A"}
+                                  </p>
+                                  <p className="text-sm font-semibold">Hotel Stay</p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {pkg.hotel.name} | Rating: {pkg.hotel.rating ?? "N/A"}
+                                  </p>
+                                  <p className="text-sm text-[var(--text-secondary)]">Stay Price: {pkg.hotel.price}</p>
+                                  <p className="text-sm font-semibold">Return Flight</p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
+                                    {pkg.flight.return_destination || pkg.flight.origin} | Departs:{" "}
+                                    {pkg.flight.return_departure_time || "N/A"}
+                                  </p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    {Array.isArray(pkg.flight.return_flight_numbers) &&
+                                    pkg.flight.return_flight_numbers.length > 0
+                                      ? pkg.flight.return_flight_numbers.join(", ")
+                                      : "N/A"}
+                                  </p>
+                                  <p className="font-semibold">Package Total: {pkg.total_price}</p>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                        {!message.data.meta?.package_requested && (message.data.packages || []).length > 0 && (
                           <div className="mb-4">
                             <p className="font-semibold mb-2">Bundles</p>
                             <div className="space-y-2">
@@ -625,7 +686,7 @@ export default function Home() {
                           </div>
                         )}
 
-                        <div className="mb-4">
+                        {!message.data.meta?.package_requested && <div className="mb-4">
                           <p className="font-semibold mb-2">Flights</p>
                           {message.data.meta?.direct_fallback_used && (
                             <p className="mb-2 text-sm text-[var(--text-secondary)]">
@@ -707,9 +768,9 @@ export default function Home() {
                               </div>
                             ))}
                           </div>
-                        </div>
+                        </div>}
 
-                        {(message.data.hotels || []).length > 0 && (
+                        {!message.data.meta?.package_requested && (message.data.hotels || []).length > 0 && (
                           <div>
                             <p className="font-semibold mb-2">Hotels</p>
                             {message.data.meta?.hotel_filter_relaxed && (
@@ -738,7 +799,9 @@ export default function Home() {
                           </div>
                         )}
 
-                        {message.data.meta?.hotel_requested && (message.data.hotels || []).length === 0 && (
+                        {!message.data.meta?.package_requested &&
+                          message.data.meta?.hotel_requested &&
+                          (message.data.hotels || []).length === 0 && (
                           <div className="mt-2 text-sm text-[var(--text-secondary)]">
                             No hotel matches found for the current filters.
                             {message.data.meta?.hotel_star_rating_active

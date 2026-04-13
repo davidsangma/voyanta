@@ -487,14 +487,14 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <Image
                 src="/voyanta_logo.png"
-                alt="Voyanta logo"
+                alt="Nomad logo"
                 width={28}
                 height={28}
                 className="object-contain"
                 priority
               />
               <div className="leading-tight">
-                <span className="text-lg font-semibold tracking-wide block">Voyanta</span>
+                <span className="text-lg font-semibold tracking-wide block">Nomad</span>
                 <span className="brand-script text-xs text-[var(--text-muted)] block -mt-0.5">
                   Worth Exploring
                 </span>
@@ -562,7 +562,7 @@ export default function Home() {
         {messages.length === 0 && !loading && (
           <div className="min-h-[48vh] flex items-center justify-center">
             <div className="max-w-xl w-full bg-[linear-gradient(160deg,rgba(255,255,255,0.84),rgba(252,243,235,0.92))] border border-[#dcbfaf] rounded-2xl p-6 shadow-[0_10px_26px_rgba(106,78,57,0.16)]">
-              <p className="text-xl font-semibold mb-2">Hey, I am Voyanta.</p>
+              <p className="text-xl font-semibold mb-2">Hey, I am Nomad.</p>
               <p className="text-sm text-[var(--text-secondary)] mb-4">
                 Tell me where you want to go.
                 <br />

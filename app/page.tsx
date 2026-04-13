@@ -37,6 +37,7 @@ type TripState = {
   destination_city?: string | null;
   departure_date?: string | null;
   return_date?: string | null;
+  trip_type?: "one_way" | "round_trip" | null;
   class?: string | null;
   airline_brand?: string | null;
   hotel_required?: "yes" | "no" | null;
@@ -103,6 +104,8 @@ type EditableStateKey =
   | "source_city"
   | "destination_city"
   | "departure_date"
+  | "return_date"
+  | "trip_type"
   | "class"
   | "airline_brand"
   | "hotel_required"
@@ -136,11 +139,12 @@ function formatStateSummary(state: TripState | null): string {
   const source = state.source_city || "Source not set";
   const destination = state.destination_city || "Destination not set";
   const date = state.departure_date || "Date not set";
+  const tripType = state.trip_type ? toTitleCase(state.trip_type) : "Trip type not set";
   const cabin = state.class ? toTitleCase(state.class) : "Economy";
   const airline = state.airline_brand || "Any airline";
   const hotels = state.hotel_required === "yes" ? "On" : "Off";
 
-  return `${source} -> ${destination} | ${date} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
+  return `${source} -> ${destination} | ${date} | ${tripType} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
 }
 
 function toApiHistory(messages: ChatMessage[]): ApiHistoryMessage[] {
@@ -359,6 +363,17 @@ export default function Home() {
       return;
     }
 
+    if (key === "trip_type") {
+      next.trip_type = next.trip_type === "round_trip" ? "one_way" : "round_trip";
+      if (next.trip_type === "one_way") next.return_date = null;
+      setStateSnapshot(next);
+      await submitTurn(
+        next.trip_type === "round_trip" ? "Set trip type to round trip" : "Set trip type to one way",
+        next
+      );
+      return;
+    }
+
     if (key === "budget_mode") {
       const order: Array<TripState["budget_mode"]> = ["budget", "balanced", "luxury"];
       const idx = Math.max(0, order.indexOf(next.budget_mode || "balanced"));
@@ -475,6 +490,8 @@ export default function Home() {
                     ["source_city", stateSnapshot.source_city || "Source not set"],
                     ["destination_city", stateSnapshot.destination_city || "Destination not set"],
                     ["departure_date", stateSnapshot.departure_date || "Date not set"],
+                    ["return_date", stateSnapshot.return_date || "Not set"],
+                    ["trip_type", stateSnapshot.trip_type || "not set"],
                     ["class", stateSnapshot.class || "economy"],
                     ["airline_brand", stateSnapshot.airline_brand || "any airline"],
                     ["hotel_required", stateSnapshot.hotel_required || "no"],

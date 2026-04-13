@@ -636,6 +636,13 @@ export default function Home() {
                               <div className="mb-4">
                                 <p className="font-semibold mb-2">Your Package</p>
                                 <p className="text-sm text-[var(--text-secondary)] mb-2">{pkg.saving_hint || ""}</p>
+                                <p className="text-sm text-[var(--text-secondary)]">
+                                  This package is selected by combining a high-ranked onward flight, a strong hotel
+                                  value, and a feasible return option.
+                                </p>
+                                <p className="text-sm text-[var(--text-secondary)] mb-2">
+                                  It balances total trip cost and travel convenience for your chosen dates.
+                                </p>
                                 {pkg.nights && (
                                   <p className="text-sm text-[var(--text-secondary)] mb-2">
                                     Stay duration: {pkg.nights} night(s)
@@ -645,10 +652,24 @@ export default function Home() {
                                 <div className="space-y-2">
                                   <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
                                     <p className="font-semibold mb-1">1. Ongoing Flight</p>
-                                    <p className="font-semibold">
-                                      {pkg.flight.airline}
-                                      {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
-                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      {pkg.flight.airline_logo_url && (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={pkg.flight.airline_logo_url}
+                                          alt={`${pkg.flight.airline} logo`}
+                                          width={18}
+                                          height={18}
+                                          className="rounded-sm object-contain"
+                                          loading="lazy"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      )}
+                                      <p className="font-semibold">
+                                        {pkg.flight.airline}
+                                        {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
+                                      </p>
+                                    </div>
                                     <p className="text-sm text-[var(--text-secondary)]">
                                       {pkg.flight.origin} -&gt; {pkg.flight.destination} | {pkg.flight.duration}
                                     </p>
@@ -689,10 +710,24 @@ export default function Home() {
 
                                   <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
                                     <p className="font-semibold mb-1">3. Returning Flight</p>
-                                    <p className="font-semibold">
-                                      {pkg.flight.airline}
-                                      {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
-                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      {pkg.flight.airline_logo_url && (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={pkg.flight.airline_logo_url}
+                                          alt={`${pkg.flight.airline} logo`}
+                                          width={18}
+                                          height={18}
+                                          className="rounded-sm object-contain"
+                                          loading="lazy"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      )}
+                                      <p className="font-semibold">
+                                        {pkg.flight.airline}
+                                        {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
+                                      </p>
+                                    </div>
                                     <p className="text-sm text-[var(--text-secondary)]">
                                       {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
                                       {pkg.flight.return_destination || pkg.flight.origin}

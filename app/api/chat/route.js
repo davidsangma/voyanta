@@ -636,6 +636,11 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
     clearSlot(next, "return_date");
   }
 
+  // Default stay recommendations for round trips unless user explicitly says no hotels.
+  if (next.trip_type === "round_trip" && next.hotel_required !== "no") {
+    setSlot(next, "hotel_required", "yes", "inferred");
+  }
+
   if (next.hotel_required === "no") {
     clearSlot(next, "hotel_star_rating");
     clearSlot(next, "hotel_brand");
@@ -949,6 +954,13 @@ function collectFlightLabels(flight) {
     .filter((label, index, arr) => arr.indexOf(label) === index);
 }
 
+function collectSegmentLabels(segments) {
+  return (Array.isArray(segments) ? segments : [])
+    .map((segment) => getFlightLabel(segment))
+    .filter(Boolean)
+    .filter((label, index, arr) => arr.indexOf(label) === index);
+}
+
 function normalizeScore(values, index, inverse = false) {
   if (!values.length) return 0;
 
@@ -1002,6 +1014,13 @@ function rankFlights(flights, state) {
     });
 }
 
+function parseCurrencyCodeFromPrice(price) {
+  const value = normalizeWhitespace(price || "");
+  if (!value) return "INR";
+  const match = value.match(/\b([A-Z]{3})\b/);
+  return match?.[1] || "INR";
+}
+
 function mapCabinClassToSerpValue(cabinClass) {
   const normalized = String(cabinClass || "").toLowerCase().trim();
   if (normalized === "economy") return "1";
@@ -1052,22 +1071,38 @@ async function fetchFlights(origin, destination, state) {
   }
 
   const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return {
+      flights: [],
+      direct_only_available: null,
+      direct_fallback_used: false,
+    };
+  }
 
   const data = await res.json();
   const sourceFlights = data?.best_flights || data?.other_flights || [];
 
   const normalized = sourceFlights.slice(0, 15).map((flight) => {
     const segments = flight?.flights || [];
+    const returnSegments = flight?.return_flights || [];
     const first = segments[0];
     const last = segments[segments.length - 1];
     const allFlightLabels = collectFlightLabels(flight);
+    const outboundFlightLabels = collectSegmentLabels(segments);
+    const returnFlightLabels = collectSegmentLabels(returnSegments);
 
     const duration = Number(flight?.total_duration) || null;
     const priceValue = parsePrice(flight?.price);
     const stops = Math.max(0, segments.length - 1);
     const flightNumber = allFlightLabels[0] || "N/A";
     const departureTime = first?.departure_airport?.time || first?.departure_time || "N/A";
+    const returnFirst = returnSegments[0];
+    const returnLast = returnSegments[returnSegments.length - 1];
+    const returnDepartureTime =
+      returnFirst?.departure_airport?.time || returnFirst?.departure_time || "N/A";
+    const returnArrivalTime = returnLast?.arrival_airport?.time || returnLast?.arrival_time || "N/A";
+    const returnOrigin = returnFirst?.departure_airport?.id || destination;
+    const returnDestination = returnLast?.arrival_airport?.id || origin;
 
     return {
       airline: first?.airline || "Unknown",
@@ -1083,6 +1118,12 @@ async function fetchFlights(origin, destination, state) {
       departure_time: departureTime,
       flight_number: flightNumber,
       flight_numbers: allFlightLabels,
+      outbound_flight_numbers: outboundFlightLabels,
+      return_flight_numbers: returnFlightLabels,
+      return_departure_time: returnDepartureTime,
+      return_arrival_time: returnArrivalTime,
+      return_origin: returnOrigin,
+      return_destination: returnDestination,
       stops,
       stops_label: formatStopsLabel(stops),
     };
@@ -1144,6 +1185,43 @@ function rankHotels(hotels, state) {
       delete cleaned._score;
       return cleaned;
     });
+}
+
+function buildPackages(flights, hotels) {
+  if (!Array.isArray(flights) || !Array.isArray(hotels) || flights.length === 0 || hotels.length === 0) {
+    return [];
+  }
+
+  const topFlights = flights.slice(0, 3);
+  const topHotels = hotels.slice(0, 3);
+  const packages = [];
+
+  for (let i = 0; i < Math.min(topFlights.length, topHotels.length); i += 1) {
+    const flight = topFlights[i];
+    const hotel = topHotels[i];
+    const flightPrice = typeof flight?.price_value === "number" ? flight.price_value : null;
+    const hotelPrice = typeof hotel?.price_value === "number" ? hotel.price_value : null;
+    const total = flightPrice != null && hotelPrice != null ? flightPrice + hotelPrice : null;
+    const currency = parseCurrencyCodeFromPrice(flight?.price || hotel?.price || "INR");
+
+    packages.push({
+      id: `pkg_${i + 1}`,
+      title: i === 0 ? "Best Value Bundle" : i === 1 ? "Comfort Bundle" : "Premium Bundle",
+      flight,
+      hotel,
+      total_price: total != null ? `${Math.round(total)} ${currency}` : "N/A",
+      total_price_value: total,
+      saving_hint:
+        i === 0 ? "Balanced on price and quality" : i === 1 ? "Comfort-focused pick" : "Higher comfort option",
+    });
+  }
+
+  return packages.sort((a, b) => {
+    if (a.total_price_value == null && b.total_price_value == null) return 0;
+    if (a.total_price_value == null) return 1;
+    if (b.total_price_value == null) return -1;
+    return a.total_price_value - b.total_price_value;
+  });
 }
 
 function matchesHotelBrand(hotel, requestedBrand) {
@@ -1570,6 +1648,7 @@ export async function GET(request) {
           }),
     ]);
     const hotels = hotelResult.hotels;
+    const packages = buildPackages(flightResult.flights, hotels);
 
     return json({
       type: "result",
@@ -1580,6 +1659,7 @@ export async function GET(request) {
         source_airport: sourceAirport.code,
         destination_airport: destinationAirport.code,
       },
+      packages,
       best_flights: flightResult.flights,
       hotels,
       state_snapshot: state,
@@ -1588,6 +1668,7 @@ export async function GET(request) {
         ranked_by: ["price", "duration", "stops", "hotel_quality"],
         hotel_requested: hotelRequested,
         hotel_count: hotels.length,
+        package_count: packages.length,
         hotel_filter_relaxed: hotelResult.hotel_filter_relaxed,
         hotel_relax_reason: hotelResult.hotel_relax_reason,
         hotel_star_rating_active: Boolean(state.hotel_star_rating),

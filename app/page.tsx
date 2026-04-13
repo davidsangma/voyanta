@@ -21,8 +21,14 @@ type Flight = {
   stops: number;
   stops_label?: string;
   departure_time?: string;
+  return_departure_time?: string;
+  return_arrival_time?: string;
+  return_origin?: string;
+  return_destination?: string;
   flight_number?: string;
   flight_numbers?: string[];
+  outbound_flight_numbers?: string[];
+  return_flight_numbers?: string[];
 };
 
 type Hotel = {
@@ -30,6 +36,15 @@ type Hotel = {
   rating: number | null;
   price: string;
   link: string;
+};
+
+type TravelPackage = {
+  id: string;
+  title: string;
+  flight: Flight;
+  hotel: Hotel;
+  total_price: string;
+  saving_hint?: string;
 };
 
 type TripState = {
@@ -62,6 +77,7 @@ type FollowUpResponse = {
 type ResultResponse = {
   type: "result";
   trip?: Record<string, unknown>;
+  packages?: TravelPackage[];
   best_flights?: Flight[];
   hotels?: Hotel[];
   state_snapshot?: TripState;
@@ -74,6 +90,7 @@ type ResultResponse = {
     hotel_filter_relaxed?: boolean;
     hotel_relax_reason?: string | null;
     hotel_star_rating_active?: boolean;
+    package_count?: number;
     ranked_by?: string[];
     direct_only_requested?: boolean;
     direct_only_available?: boolean | null;
@@ -587,6 +604,27 @@ export default function Home() {
                           <p className="text-xs text-[var(--text-secondary)] mb-3">{message.data.update_summary}</p>
                         )}
 
+                        {(message.data.packages || []).length > 0 && (
+                          <div className="mb-4">
+                            <p className="font-semibold mb-2">Bundles</p>
+                            <div className="space-y-2">
+                              {(message.data.packages || []).slice(0, 3).map((pkg, i) => (
+                                <div
+                                  key={pkg.id || i}
+                                  className="bg-[linear-gradient(160deg,#f5f8ff,#eef3ff)] p-3 rounded-lg border border-[#cfd8f1]"
+                                >
+                                  <p className="font-semibold">{pkg.title}</p>
+                                  <p className="text-sm text-[var(--text-secondary)]">
+                                    Flight: {pkg.flight.airline} | Hotel: {pkg.hotel.name}
+                                  </p>
+                                  <p className="text-sm text-[var(--text-secondary)]">{pkg.saving_hint || ""}</p>
+                                  <p className="font-semibold">Total: {pkg.total_price}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mb-4">
                           <p className="font-semibold mb-2">Flights</p>
                           {message.data.meta?.direct_fallback_used && (
@@ -649,6 +687,22 @@ export default function Home() {
                                     ? flight.flight_numbers.join(", ")
                                     : flight.flight_number || "N/A"}
                                 </p>
+                                {flight.trip_type === "round_trip" && (
+                                  <>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Return: {flight.return_origin || flight.destination} -&gt;{" "}
+                                      {flight.return_destination || flight.origin} | Departs:{" "}
+                                      {flight.return_departure_time || "N/A"}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Return flights:{" "}
+                                      {Array.isArray(flight.return_flight_numbers) &&
+                                      flight.return_flight_numbers.length > 0
+                                        ? flight.return_flight_numbers.join(", ")
+                                        : "N/A"}
+                                    </p>
+                                  </>
+                                )}
                                 <p className="font-semibold">{flight.price}</p>
                               </div>
                             ))}

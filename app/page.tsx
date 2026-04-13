@@ -625,42 +625,83 @@ export default function Home() {
                           (() => {
                             const pkg = (message.data.packages || [])[0];
                             if (!pkg) return null;
+
                             return (
                               <div className="mb-4">
                                 <p className="font-semibold mb-2">Your Package</p>
-                                <div className="bg-[linear-gradient(160deg,#f5f8ff,#eef3ff)] p-3 rounded-lg border border-[#cfd8f1] space-y-2">
-                                  <p className="font-semibold">{pkg.title}</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">{pkg.saving_hint || ""}</p>
-                                  <p className="text-sm font-semibold">Ongoing Flight</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    {pkg.flight.origin} -&gt; {pkg.flight.destination} | Departs:{" "}
-                                    {pkg.flight.departure_time || "N/A"}
-                                  </p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    {Array.isArray(pkg.flight.outbound_flight_numbers) &&
-                                    pkg.flight.outbound_flight_numbers.length > 0
-                                      ? pkg.flight.outbound_flight_numbers.join(", ")
-                                      : pkg.flight.flight_number || "N/A"}
-                                  </p>
-                                  <p className="text-sm font-semibold">Hotel Stay</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    {pkg.hotel.name} | Rating: {pkg.hotel.rating ?? "N/A"}
-                                  </p>
-                                  <p className="text-sm text-[var(--text-secondary)]">Stay Price: {pkg.hotel.price}</p>
-                                  <p className="text-sm font-semibold">Return Flight</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
-                                    {pkg.flight.return_destination || pkg.flight.origin} | Departs:{" "}
-                                    {pkg.flight.return_departure_time || "N/A"}
-                                  </p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    {Array.isArray(pkg.flight.return_flight_numbers) &&
-                                    pkg.flight.return_flight_numbers.length > 0
-                                      ? pkg.flight.return_flight_numbers.join(", ")
-                                      : "N/A"}
-                                  </p>
-                                  <p className="font-semibold">Package Total: {pkg.total_price}</p>
+                                <p className="text-sm text-[var(--text-secondary)] mb-2">{pkg.saving_hint || ""}</p>
+
+                                <div className="space-y-2">
+                                  <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
+                                    <p className="font-semibold mb-1">1. Ongoing Flight</p>
+                                    <p className="font-semibold">
+                                      {pkg.flight.airline}
+                                      {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      {pkg.flight.origin} -&gt; {pkg.flight.destination} | {pkg.flight.duration}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Cabin: {toTitleCase((pkg.flight.cabin_class || "economy").toLowerCase())}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      {pkg.flight.stops_label ||
+                                        `${pkg.flight.stops} stop${pkg.flight.stops === 1 ? "" : "s"}`}{" "}
+                                      | Departs: {pkg.flight.departure_time || "N/A"}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Flights:{" "}
+                                      {Array.isArray(pkg.flight.outbound_flight_numbers) &&
+                                      pkg.flight.outbound_flight_numbers.length > 0
+                                        ? pkg.flight.outbound_flight_numbers.join(", ")
+                                        : pkg.flight.flight_number || "N/A"}
+                                    </p>
+                                    <p className="font-semibold">{pkg.flight.price}</p>
+                                  </div>
+
+                                  <div className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] p-3 rounded-lg border border-[#dfc9bc]">
+                                    <p className="font-semibold mb-1">2. Hotel Stay</p>
+                                    <p className="font-semibold">{pkg.hotel.name}</p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Rating: {pkg.hotel.rating ?? "N/A"}
+                                    </p>
+                                    <p className="font-semibold">{pkg.hotel.price}</p>
+                                    <a
+                                      href={pkg.hotel.link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-[var(--accent-navy)] text-sm"
+                                    >
+                                      View
+                                    </a>
+                                  </div>
+
+                                  <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
+                                    <p className="font-semibold mb-1">3. Returning Flight</p>
+                                    <p className="font-semibold">
+                                      {pkg.flight.airline}
+                                      {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
+                                      {pkg.flight.return_destination || pkg.flight.origin}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Departs: {pkg.flight.return_departure_time || "N/A"} | Arrives:{" "}
+                                      {pkg.flight.return_arrival_time || "N/A"}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Flights:{" "}
+                                      {Array.isArray(pkg.flight.return_flight_numbers) &&
+                                      pkg.flight.return_flight_numbers.length > 0
+                                        ? pkg.flight.return_flight_numbers.join(", ")
+                                        : "N/A"}
+                                    </p>
+                                    <p className="font-semibold">{pkg.flight.price}</p>
+                                  </div>
                                 </div>
+
+                                <p className="font-semibold mt-2">Package Total: {pkg.total_price}</p>
                               </div>
                             );
                           })()}

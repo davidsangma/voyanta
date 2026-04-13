@@ -60,6 +60,49 @@ const COUNTRY_NAMES = new Set(
   ].map((v) => v.toLowerCase())
 );
 
+const COUNTRY_CITY_EXAMPLES = {
+  india: ["Delhi", "Mumbai", "Bengaluru"],
+  japan: ["Tokyo", "Osaka", "Kyoto"],
+  thailand: ["Bangkok", "Phuket", "Chiang Mai"],
+  china: ["Beijing", "Shanghai", "Guangzhou"],
+  france: ["Paris", "Nice", "Lyon"],
+  germany: ["Berlin", "Frankfurt", "Munich"],
+  italy: ["Rome", "Milan", "Venice"],
+  spain: ["Madrid", "Barcelona", "Seville"],
+  switzerland: ["Zurich", "Geneva", "Basel"],
+  australia: ["Sydney", "Melbourne", "Brisbane"],
+  singapore: ["Singapore"],
+  malaysia: ["Kuala Lumpur", "Penang", "Langkawi"],
+  indonesia: ["Jakarta", "Bali", "Surabaya"],
+  vietnam: ["Hanoi", "Ho Chi Minh City", "Da Nang"],
+  uae: ["Dubai", "Abu Dhabi", "Sharjah"],
+  "united arab emirates": ["Dubai", "Abu Dhabi", "Sharjah"],
+  "united states": ["New York", "San Francisco", "Chicago"],
+  usa: ["New York", "San Francisco", "Chicago"],
+  uk: ["London", "Manchester", "Edinburgh"],
+  "united kingdom": ["London", "Manchester", "Edinburgh"],
+  canada: ["Toronto", "Vancouver", "Montreal"],
+  mexico: ["Mexico City", "Cancun", "Guadalajara"],
+  turkey: ["Istanbul", "Ankara", "Antalya"],
+  qatar: ["Doha"],
+  "saudi arabia": ["Riyadh", "Jeddah", "Dammam"],
+  "sri lanka": ["Colombo", "Kandy", "Galle"],
+  nepal: ["Kathmandu", "Pokhara", "Lalitpur"],
+  bhutan: ["Thimphu", "Paro", "Punakha"],
+  "new zealand": ["Auckland", "Wellington", "Christchurch"],
+  "south korea": ["Seoul", "Busan", "Incheon"],
+  korea: ["Seoul", "Busan", "Incheon"],
+  russia: ["Moscow", "Saint Petersburg", "Kazan"],
+  netherlands: ["Amsterdam", "Rotterdam", "The Hague"],
+  belgium: ["Brussels", "Antwerp", "Bruges"],
+  portugal: ["Lisbon", "Porto", "Faro"],
+  greece: ["Athens", "Santorini", "Thessaloniki"],
+  egypt: ["Cairo", "Alexandria", "Hurghada"],
+  "south africa": ["Cape Town", "Johannesburg", "Durban"],
+  brazil: ["Sao Paulo", "Rio de Janeiro", "Brasilia"],
+  argentina: ["Buenos Aires", "Cordoba", "Mendoza"],
+};
+
 const IATA_STOPWORDS = new Set(["THE", "AND", "FOR", "AIR", "YOU", "ARE"]);
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v2";
@@ -801,6 +844,13 @@ function isLikelyCountryName(value) {
   const normalized = normalizeWhitespace(value || "").toLowerCase();
   if (!normalized) return false;
   return COUNTRY_NAMES.has(normalized);
+}
+
+function getCityExamplesForCountry(countryName) {
+  const normalized = normalizeWhitespace(countryName || "").toLowerCase();
+  const examples = COUNTRY_CITY_EXAMPLES[normalized];
+  if (Array.isArray(examples) && examples.length > 0) return examples.join(", ");
+  return "a major city";
 }
 
 function buildAirportCandidates(city) {
@@ -1800,10 +1850,11 @@ export async function GET(request) {
     if (isLikelyCountryName(state.source_city) || isLikelyCountryName(state.destination_city)) {
       const countryField = isLikelyCountryName(state.destination_city) ? "destination" : "source";
       const countryValue = countryField === "destination" ? state.destination_city : state.source_city;
+      const cityExamples = getCityExamplesForCountry(countryValue);
       const prompt =
         countryField === "destination"
-          ? `You entered "${countryValue}" as destination, which is a country. Please share a destination city (for example Tokyo, Osaka, or Kyoto).`
-          : `You entered "${countryValue}" as source, which is a country. Please share a source city (for example Delhi, Mumbai, or Bengaluru).`;
+          ? `You entered "${countryValue}" as destination, which is a country. Please share a destination city (for example ${cityExamples}).`
+          : `You entered "${countryValue}" as source, which is a country. Please share a source city (for example ${cityExamples}).`;
 
       return json({
         type: "follow_up",

@@ -15,6 +15,51 @@ const CITY_ALIASES = {
   jfk: "JFK",
 };
 
+const COUNTRY_NAMES = new Set(
+  [
+    "india",
+    "japan",
+    "china",
+    "thailand",
+    "france",
+    "germany",
+    "italy",
+    "spain",
+    "switzerland",
+    "australia",
+    "singapore",
+    "malaysia",
+    "indonesia",
+    "vietnam",
+    "uae",
+    "united arab emirates",
+    "united states",
+    "usa",
+    "uk",
+    "united kingdom",
+    "canada",
+    "mexico",
+    "turkey",
+    "qatar",
+    "saudi arabia",
+    "sri lanka",
+    "nepal",
+    "bhutan",
+    "new zealand",
+    "south korea",
+    "korea",
+    "russia",
+    "netherlands",
+    "belgium",
+    "portugal",
+    "greece",
+    "egypt",
+    "south africa",
+    "brazil",
+    "argentina",
+  ].map((v) => v.toLowerCase())
+);
+
 const IATA_STOPWORDS = new Set(["THE", "AND", "FOR", "AIR", "YOU", "ARE"]);
 const DUFFEL_BASE_URL = "https://api.duffel.com";
 const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v2";
@@ -750,6 +795,12 @@ function normalizeCityCandidate(city) {
     .replace(/[.,]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isLikelyCountryName(value) {
+  const normalized = normalizeWhitespace(value || "").toLowerCase();
+  if (!normalized) return false;
+  return COUNTRY_NAMES.has(normalized);
 }
 
 function buildAirportCandidates(city) {
@@ -1662,6 +1713,24 @@ export async function GET(request) {
         update_summary: updateSummary,
         missing,
         collected: state,
+        state_snapshot: state,
+        actions: buildActions(state),
+      });
+    }
+
+    if (isLikelyCountryName(state.source_city) || isLikelyCountryName(state.destination_city)) {
+      const countryField = isLikelyCountryName(state.destination_city) ? "destination" : "source";
+      const countryValue = countryField === "destination" ? state.destination_city : state.source_city;
+      const prompt =
+        countryField === "destination"
+          ? `You entered "${countryValue}" as destination, which is a country. Please share a destination city (for example Tokyo, Osaka, or Kyoto).`
+          : `You entered "${countryValue}" as source, which is a country. Please share a source city (for example Delhi, Mumbai, or Bengaluru).`;
+
+      return json({
+        type: "follow_up",
+        intent_detected: intent,
+        message: prompt,
+        update_summary: updateSummary,
         state_snapshot: state,
         actions: buildActions(state),
       });

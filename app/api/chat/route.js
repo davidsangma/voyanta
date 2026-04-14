@@ -109,6 +109,44 @@ const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v2";
 const DUFFEL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DUFFEL_MAX_PAGES = 12;
 const DUFFEL_MAX_CODES_PER_REQUEST = 12;
+const LUXURY_HOTEL_CHAINS = [
+  "Mandarin Oriental",
+  "Aman",
+  "Bulgari",
+  "Oetker Collection",
+  "Rosewood",
+  "Four Seasons",
+  "Six Senses",
+  "Auberge Resorts",
+  "Rocco Forte",
+  "One&Only",
+  "Belmond",
+  "Dorchester Collection",
+  "The Peninsula",
+  "Banyan Tree",
+  "Raffles",
+  "COMO Hotels and Resorts",
+  "Capella Hotels & Resorts",
+  "Taj Hotels",
+  "Oberoi Hotels & Resorts",
+  "Regent Hotels & Resorts",
+  "Montage Hotels & Resorts",
+  "Alila Hotels & Resorts",
+  "Anantara Hotels & Resorts",
+  "The Langham",
+  "LXR Hotels & Resorts",
+  "The Ritz-Carlton",
+  "St. Regis",
+  "Waldorf Astoria",
+  "Conrad Hotels & Resorts",
+  "Park Hyatt",
+  "Shangri-La",
+  "Kempinski",
+  "Fairmont",
+  "InterContinental",
+  "Edition",
+  "Jumeirah",
+];
 
 const duffelAirlineCache = {
   byCode: new Map(),
@@ -426,6 +464,33 @@ function simplifyBrandText(value) {
 
   // Helps match common minor misspellings like "mariott" vs "marriott".
   return cleaned.replace(/([a-z])\1+/g, "$1");
+}
+
+function toBrandTokens(value) {
+  return simplifyBrandText(value)
+    .replace(/\b(the|hotels?|resorts?|collection|and|&)\b/g, " ")
+    .split(" ")
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
+}
+
+function isLuxuryIntent(state) {
+  return state?.budget_mode === "luxury" || Number(state?.hotel_star_rating) >= 5;
+}
+
+function matchesLuxuryChain(hotelName) {
+  const haystack = simplifyBrandText(hotelName || "");
+  if (!haystack) return false;
+
+  return LUXURY_HOTEL_CHAINS.some((chain) => {
+    const chainNorm = simplifyBrandText(chain);
+    if (!chainNorm) return false;
+    if (haystack.includes(chainNorm)) return true;
+
+    const tokens = toBrandTokens(chain);
+    if (tokens.length === 0) return false;
+    return tokens.every((token) => haystack.includes(token));
+  });
 }
 
 function detectIntent(history) {
@@ -1448,6 +1513,8 @@ function rankHotels(hotels, state) {
 
   const prices = hotels.map((h) => h.price_value ?? Number.MAX_SAFE_INTEGER / 10);
   const ratings = hotels.map((h) => (typeof h.rating === "number" ? h.rating : 0));
+  const luxuryIntent = isLuxuryIntent(state);
+  const luxuryAvailable = luxuryIntent && hotels.some((hotel) => matchesLuxuryChain(hotel?.name));
 
   return hotels
     .map((hotel, index) => {
@@ -1459,6 +1526,12 @@ function rankHotels(hotels, state) {
 
       if (state.budget_mode === "budget") {
         score = normalizeScore(prices, index) * 0.75 + normalizeScore(ratings, index, true) * 0.25;
+      }
+
+      if (luxuryAvailable) {
+        const chainMatch = matchesLuxuryChain(hotel?.name);
+        // Lower score is better. For luxury intent, strongly prioritize known luxury chains when available.
+        score += chainMatch ? -0.3 : 0.08;
       }
 
       return { ...hotel, _score: score };

@@ -26,6 +26,9 @@ type Flight = {
   onward_price_value?: number | null;
   return_price?: string;
   return_price_value?: number | null;
+  return_airline?: string | null;
+  return_airline_iata_code?: string | null;
+  return_airline_logo_url?: string | null;
   return_departure_time?: string;
   return_arrival_time?: string;
   return_origin?: string;
@@ -853,11 +856,11 @@ export default function Home() {
                                   <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
                                     <p className="font-semibold mb-1">3. Returning Flight</p>
                                     <div className="flex items-center gap-2">
-                                      {pkg.flight.airline_logo_url && (
+                                      {(pkg.flight.return_airline_logo_url || pkg.flight.airline_logo_url) && (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img
-                                          src={pkg.flight.airline_logo_url}
-                                          alt={`${pkg.flight.airline} logo`}
+                                          src={pkg.flight.return_airline_logo_url || pkg.flight.airline_logo_url || ""}
+                                          alt={`${pkg.flight.return_airline || pkg.flight.airline} logo`}
                                           width={18}
                                           height={18}
                                           className="rounded-sm object-contain"
@@ -866,8 +869,10 @@ export default function Home() {
                                         />
                                       )}
                                       <p className="font-semibold">
-                                        {pkg.flight.airline}
-                                        {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
+                                        {pkg.flight.return_airline || pkg.flight.airline}
+                                        {(pkg.flight.return_airline_iata_code || pkg.flight.airline_iata_code)
+                                          ? ` (${pkg.flight.return_airline_iata_code || pkg.flight.airline_iata_code})`
+                                          : ""}
                                       </p>
                                     </div>
                                     <p className="text-sm text-[var(--text-secondary)]">

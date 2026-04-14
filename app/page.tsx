@@ -49,8 +49,34 @@ type TravelPackage = {
   flight: Flight;
   hotel: Hotel;
   total_price: string;
+  total_price_value?: number | null;
   nights?: number;
   saving_hint?: string;
+};
+
+type TradeoffScores = {
+  price: number;
+  location: number;
+  comfort: number;
+  vibe: number;
+};
+
+type ScoredRecommendation = {
+  package: TravelPackage;
+  scores: TradeoffScores;
+  composite_score: number;
+  data_gaps?: number;
+};
+
+type DecisionPayload = {
+  primary_recommendation?: ScoredRecommendation | null;
+  fallback_recommendation?: ScoredRecommendation | null;
+  confidence?: {
+    score: number;
+    label: string;
+    drivers?: string[];
+  };
+  decision_reasoning?: string;
 };
 
 type TripState = {
@@ -87,6 +113,15 @@ type ResultResponse = {
   packages?: TravelPackage[];
   best_flights?: Flight[];
   hotels?: Hotel[];
+  decision?: DecisionPayload | null;
+  why_for_you?: string[];
+  tradeoff?: {
+    axes?: TradeoffScores;
+    comparison?: {
+      primary?: TradeoffScores & { composite?: number };
+      fallback?: TradeoffScores & { composite?: number };
+    } | null;
+  } | null;
   state_snapshot?: TripState;
   intent_detected?: string;
   update_summary?: string;
@@ -157,6 +192,12 @@ function toTitleCase(value: string): string {
     .split("_")
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
+}
+
+function scoreBarTone(score: number): string {
+  if (score >= 75) return "bg-[linear-gradient(90deg,#6cab8f,#4f8f73)]";
+  if (score >= 55) return "bg-[linear-gradient(90deg,#c9b45e,#b5953e)]";
+  return "bg-[linear-gradient(90deg,#d4907f,#bc6c57)]";
 }
 
 function formatStateSummary(state: TripState | null): string {
@@ -594,6 +635,12 @@ export default function Home() {
             message.role === "user"
               ? `u-${index}-${message.content}`
               : `b-${index}-${JSON.stringify(message.data).slice(0, 80)}`;
+          const resultPayload =
+            message.role === "bot" && isResultResponse(message.data) ? message.data : null;
+          const primaryRecommendation = resultPayload?.decision?.primary_recommendation || null;
+          const fallbackRecommendation = resultPayload?.decision?.fallback_recommendation || null;
+          const tradeoffAxes = resultPayload?.tradeoff?.axes || null;
+          const whyForYou = (resultPayload?.why_for_you || []).slice(0, 5);
 
           return (
             <div key={messageKey}>
@@ -624,6 +671,101 @@ export default function Home() {
                       <>
                         {message.data.update_summary && (
                           <p className="text-xs text-[var(--text-secondary)] mb-3">{message.data.update_summary}</p>
+                        )}
+
+                        {primaryRecommendation && (
+                          <div className="mb-4 bg-[linear-gradient(160deg,#eef8f1,#e6f1ea)] border border-[#bfd8c7] rounded-xl p-4">
+                            <div className="flex items-start justify-between gap-3 mb-2">
+                              <div>
+                                <p className="text-xs uppercase tracking-wide text-[#3b6a55]">Decision-First Pick</p>
+                                <p className="font-semibold">Your Best Pick</p>
+                              </div>
+                              {message.data.decision?.confidence && (
+                                <div className="text-right">
+                                  <p className="text-xs text-[var(--text-secondary)]">Confidence</p>
+                                  <p className="font-semibold">
+                                    {message.data.decision.confidence.label} ({message.data.decision.confidence.score}
+                                    /100)
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="bg-white/70 border border-[#d2e4d7] rounded-lg p-3 mb-3">
+                              <p className="font-semibold">{primaryRecommendation.package.title}</p>
+                              <p className="text-sm text-[var(--text-secondary)]">
+                                Flight: {primaryRecommendation.package.flight.airline} | Hotel:{" "}
+                                {primaryRecommendation.package.hotel.name}
+                              </p>
+                              <p className="font-semibold mt-1">
+                                Total: {primaryRecommendation.package.total_price}
+                              </p>
+                              {message.data.decision?.decision_reasoning && (
+                                <p className="text-sm mt-2 text-[var(--text-secondary)]">
+                                  {message.data.decision.decision_reasoning}
+                                </p>
+                              )}
+                            </div>
+
+                            {whyForYou.length > 0 && (
+                              <div className="mb-3">
+                                <p className="font-semibold mb-1">Why This Is Right For You</p>
+                                <ul className="list-disc list-inside space-y-1 text-sm text-[var(--text-secondary)]">
+                                  {whyForYou.map((line, idx) => (
+                                    <li key={idx}>{line}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {tradeoffAxes && (
+                              <div className="space-y-2">
+                                <p className="font-semibold">Trade-off View</p>
+                                {(
+                                  [
+                                    ["price", tradeoffAxes.price],
+                                    ["location", tradeoffAxes.location],
+                                    ["comfort", tradeoffAxes.comfort],
+                                    ["vibe", tradeoffAxes.vibe],
+                                  ] as Array<[string, number]>
+                                ).map(([label, score]) => (
+                                  <div key={label}>
+                                    <div className="flex items-center justify-between text-xs mb-1">
+                                      <span className="capitalize">{label}</span>
+                                      <span>{score}/100</span>
+                                    </div>
+                                    <div className="h-2 rounded-full bg-white/80 border border-[#d6e6dc] overflow-hidden">
+                                      <div
+                                        className={`h-full ${scoreBarTone(score)}`}
+                                        style={{ width: `${Math.max(4, Math.min(100, score))}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {fallbackRecommendation && (
+                              <div className="mt-3 bg-[linear-gradient(160deg,#f8f4ed,#f3ece1)] border border-[#dccbb5] rounded-lg p-3">
+                                <p className="font-semibold mb-1">Fallback Option</p>
+                                <p className="text-sm text-[var(--text-secondary)]">
+                                  {fallbackRecommendation.package.title}
+                                </p>
+                                <p className="text-sm text-[var(--text-secondary)]">
+                                  Flight: {fallbackRecommendation.package.flight.airline} | Hotel:{" "}
+                                  {fallbackRecommendation.package.hotel.name}
+                                </p>
+                                <p className="font-semibold">{fallbackRecommendation.package.total_price}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <div className={primaryRecommendation ? "opacity-75" : ""}>
+                        {primaryRecommendation && (
+                          <p className="text-xs uppercase tracking-wide text-[var(--text-muted)] mb-2">
+                            Supporting options
+                          </p>
                         )}
 
                         {message.data.meta?.package_requested &&
@@ -912,6 +1054,7 @@ export default function Home() {
                             ))}
                           </div>
                         )}
+                        </div>
                       </>
                     )}
                   </div>

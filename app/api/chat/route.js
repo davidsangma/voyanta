@@ -1453,6 +1453,275 @@ function buildPackages(flights, hotels, state) {
   });
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function scoreToInt(value) {
+  return Math.round(clamp(value, 0, 100));
+}
+
+function normalizeMetric(values, index, inverse = false) {
+  if (!values.length) return 50;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max === min) return 50;
+
+  const raw = (values[index] - min) / (max - min);
+  const adjusted = inverse ? 1 - raw : raw;
+  return scoreToInt(adjusted * 100);
+}
+
+function getCabinComfortScore(cabinClass) {
+  const normalized = String(cabinClass || "economy").toLowerCase();
+  if (normalized === "first") return 95;
+  if (normalized === "business") return 80;
+  if (normalized === "premium_economy") return 62;
+  return 45;
+}
+
+function getHotelComfortScore(hotel) {
+  const classScore =
+    typeof hotel?.hotel_class === "number" ? scoreToInt((hotel.hotel_class / 5) * 100) : null;
+  const ratingScore = typeof hotel?.rating === "number" ? scoreToInt((hotel.rating / 5) * 100) : null;
+
+  if (classScore != null && ratingScore != null) return scoreToInt(classScore * 0.55 + ratingScore * 0.45);
+  if (classScore != null) return classScore;
+  if (ratingScore != null) return ratingScore;
+  return 50;
+}
+
+function getVibeBaseScore(pkg) {
+  const hotel = pkg?.hotel || {};
+  const name = normalizeWhitespace(hotel?.name || "").toLowerCase();
+  let score = getHotelComfortScore(hotel) * 0.7;
+
+  if (/\b(resort|spa|palace|grand|boutique|heritage)\b/.test(name)) score += 10;
+  if (/\b(airport|inn|hostel|motel)\b/.test(name)) score -= 8;
+
+  return scoreToInt(score);
+}
+
+function getBudgetAlignmentBonus(state, packageAxes) {
+  if (state.budget_mode === "budget") {
+    return scoreToInt(packageAxes.price * 0.15);
+  }
+
+  if (state.budget_mode === "luxury") {
+    return scoreToInt((packageAxes.comfort * 0.08) + (packageAxes.vibe * 0.12));
+  }
+
+  return scoreToInt((packageAxes.price + packageAxes.comfort + packageAxes.location) / 30);
+}
+
+function getAxisWeights(state) {
+  const base = {
+    price: 0.3,
+    location: 0.25,
+    comfort: 0.25,
+    vibe: 0.2,
+  };
+
+  if (state.budget_mode === "budget") {
+    base.price = 0.45;
+    base.location = 0.25;
+    base.comfort = 0.15;
+    base.vibe = 0.15;
+  }
+
+  if (state.budget_mode === "luxury") {
+    base.price = 0.15;
+    base.location = 0.25;
+    base.comfort = 0.3;
+    base.vibe = 0.3;
+  }
+
+  if (state.direct_only) {
+    base.location += 0.1;
+    base.price = clamp(base.price - 0.05, 0.1, 1);
+  }
+
+  const total = base.price + base.location + base.comfort + base.vibe;
+  return {
+    price: base.price / total,
+    location: base.location / total,
+    comfort: base.comfort / total,
+    vibe: base.vibe / total,
+  };
+}
+
+function buildDecisionReasoning(primary, state) {
+  if (!primary) return "Not enough data to make a package recommendation yet.";
+
+  const axes = primary.scores;
+  const entries = Object.entries(axes).sort((a, b) => b[1] - a[1]);
+  const strongest = entries[0]?.[0] || "price";
+  const weakest = entries[entries.length - 1]?.[0] || "vibe";
+  const labels = {
+    price: "price value",
+    location: "location convenience",
+    comfort: "comfort",
+    vibe: "vibe",
+  };
+
+  const preferenceHint =
+    state.budget_mode === "budget"
+      ? "with a budget-first preference"
+      : state.budget_mode === "luxury"
+        ? "with a luxury-first preference"
+        : "with balanced priorities";
+
+  return `Chosen for the best overall trade-off in ${labels[strongest]} ${preferenceHint}; main compromise is ${labels[weakest]}.`;
+}
+
+function buildWhyForYou(primary, fallback, state, confidence) {
+  if (!primary) return [];
+  const axes = primary.scores;
+  const sortedAxes = Object.entries(axes).sort((a, b) => b[1] - a[1]);
+  const bestAxis = sortedAxes[0]?.[0] || "price";
+  const weakAxis = sortedAxes[sortedAxes.length - 1]?.[0] || "vibe";
+  const axisLabels = {
+    price: "price",
+    location: "location convenience",
+    comfort: "comfort",
+    vibe: "vibe",
+  };
+
+  const directHint = state.direct_only
+    ? "Direct-flight preference is respected in this pick."
+    : "Layovers are allowed to improve overall value when useful.";
+
+  const budgetHint =
+    state.budget_mode === "budget"
+      ? "The package leans toward lower total trip spend."
+      : state.budget_mode === "luxury"
+        ? "The package favors comfort and experience quality."
+        : "The package balances price, travel convenience, and stay quality.";
+
+  const fallbackHint = fallback
+    ? "A fallback is included in case you want a second strong option."
+    : "No fallback shown because this recommendation has a clear lead.";
+
+  return [
+    `This pick aligns with your trip intent for ${state.source_city} to ${state.destination_city}.`,
+    `Best overall trade-off: price ${axes.price}/100, location ${axes.location}/100, comfort ${axes.comfort}/100, vibe ${axes.vibe}/100.`,
+    `What you gain: strongest fit on ${axisLabels[bestAxis]}. ${directHint}`,
+    `What you compromise: ${axisLabels[weakAxis]} is the weakest axis for this option.`,
+    `Decision confidence is ${confidence.label.toLowerCase()} (${confidence.score}/100). ${budgetHint} ${fallbackHint}`,
+  ];
+}
+
+function buildTradeoffPayload(primary, fallback) {
+  if (!primary) return null;
+
+  return {
+    axes: { ...primary.scores },
+    comparison: fallback
+      ? {
+          primary: { ...primary.scores, composite: primary.composite_score },
+          fallback: { ...fallback.scores, composite: fallback.composite_score },
+        }
+      : null,
+  };
+}
+
+function buildDecisionPayload(packages, state, meta = {}) {
+  if (!Array.isArray(packages) || packages.length === 0) {
+    return {
+      decision: null,
+      why_for_you: [],
+      tradeoff: null,
+    };
+  }
+
+  const packageWithIndex = packages.map((pkg, index) => ({ ...pkg, _index: index }));
+  const prices = packageWithIndex.map((pkg) => pkg.total_price_value ?? Number.MAX_SAFE_INTEGER / 10);
+  const locationFriction = packageWithIndex.map((pkg) => {
+    const duration = pkg?.flight?.duration_value ?? 1500;
+    const stops = Number.isFinite(pkg?.flight?.stops) ? pkg.flight.stops : 2;
+    return duration + stops * 120;
+  });
+  const comfortRaw = packageWithIndex.map((pkg) => {
+    return scoreToInt(getCabinComfortScore(pkg?.flight?.cabin_class) * 0.35 + getHotelComfortScore(pkg?.hotel) * 0.65);
+  });
+  const vibeRaw = packageWithIndex.map((pkg) => getVibeBaseScore(pkg));
+
+  const weights = getAxisWeights(state);
+  const scored = packageWithIndex.map((pkg, index) => {
+    const scores = {
+      price: normalizeMetric(prices, index, true),
+      location: normalizeMetric(locationFriction, index, true),
+      comfort: normalizeMetric(comfortRaw, index, false),
+      vibe: normalizeMetric(vibeRaw, index, false),
+    };
+    const budgetBonus = getBudgetAlignmentBonus(state, {
+      ...scores,
+      composite: 0,
+    });
+
+    const composite =
+      scores.price * weights.price +
+      scores.location * weights.location +
+      scores.comfort * weights.comfort +
+      scores.vibe * weights.vibe +
+      budgetBonus * 0.08;
+
+    return {
+      package: pkg,
+      scores,
+      composite_score: scoreToInt(composite),
+      data_gaps:
+        (pkg?.total_price_value == null ? 1 : 0) +
+        (pkg?.flight?.duration_value == null ? 1 : 0) +
+        (pkg?.hotel?.rating == null && pkg?.hotel?.hotel_class == null ? 1 : 0),
+    };
+  });
+
+  const ranked = scored.sort((a, b) => b.composite_score - a.composite_score);
+  const primary = ranked[0] || null;
+  const secondary = ranked[1] || null;
+
+  const scoreGap = primary && secondary ? primary.composite_score - secondary.composite_score : 20;
+  const inventoryDepth = ranked.length;
+  const directPenalty = state.direct_only && meta.direct_fallback_used ? 12 : 0;
+  const confidenceScore = scoreToInt(
+    clamp(
+      52 + scoreGap * 1.2 + Math.min(12, inventoryDepth * 4) - (primary?.data_gaps || 0) * 8 - directPenalty,
+      25,
+      95
+    )
+  );
+
+  const confidenceLabel =
+    confidenceScore >= 78 ? "High" : confidenceScore >= 60 ? "Medium" : "Low";
+
+  const fallback = secondary && (confidenceScore < 72 || inventoryDepth < 3) ? secondary : null;
+  const confidence = {
+    score: confidenceScore,
+    label: confidenceLabel,
+    drivers: [
+      `score_gap:${scoreGap}`,
+      `inventory:${inventoryDepth}`,
+      `data_gaps:${primary?.data_gaps || 0}`,
+      state.direct_only && meta.direct_fallback_used ? "direct_fallback_penalty" : "no_direct_penalty",
+    ],
+  };
+
+  const decision = {
+    primary_recommendation: primary,
+    fallback_recommendation: fallback,
+    confidence,
+    decision_reasoning: buildDecisionReasoning(primary, state),
+  };
+
+  return {
+    decision,
+    why_for_you: buildWhyForYou(primary, fallback, state, confidence).slice(0, 5),
+    tradeoff: buildTradeoffPayload(primary, fallback),
+  };
+}
+
 function matchesHotelBrand(hotel, requestedBrand) {
   if (!requestedBrand) return true;
   const haystack = simplifyBrandText(hotel?.name || "");
@@ -1903,6 +2172,9 @@ export async function GET(request) {
     ]);
     const hotels = hotelResult.hotels;
     const packages = buildPackages(flightResult.flights, hotels, state);
+    const decisionPayload = buildDecisionPayload(packages, state, {
+      direct_fallback_used: flightResult.direct_fallback_used,
+    });
 
     return json({
       type: "result",
@@ -1916,6 +2188,9 @@ export async function GET(request) {
       packages,
       best_flights: flightResult.flights,
       hotels,
+      decision: decisionPayload.decision,
+      why_for_you: decisionPayload.why_for_you,
+      tradeoff: decisionPayload.tradeoff,
       state_snapshot: state,
       actions: buildActions(state),
       meta: {

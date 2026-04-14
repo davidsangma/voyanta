@@ -644,7 +644,7 @@ export default function Home() {
           const primaryRecommendation = resultPayload?.decision?.primary_recommendation || null;
           const fallbackRecommendation = resultPayload?.decision?.fallback_recommendation || null;
           const tradeoffAxes = resultPayload?.tradeoff?.axes || null;
-          const whyForYou = (resultPayload?.why_for_you || []).slice(0, 5);
+          const whyForYou = (resultPayload?.why_for_you || []).slice(0, 3);
 
           return (
             <div key={messageKey}>

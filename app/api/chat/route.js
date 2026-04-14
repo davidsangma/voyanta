@@ -1709,7 +1709,7 @@ function buildDecisionReasoning(primary, state) {
   return `Chosen for the best overall trade-off in ${labels[strongest]} ${preferenceHint}; main compromise is ${labels[weakest]}.`;
 }
 
-function buildWhyForYou(primary, fallback, state, confidence) {
+function buildWhyForYou(primary, state, confidence) {
   if (!primary) return [];
   const axes = primary.scores;
   const sortedAxes = Object.entries(axes).sort((a, b) => b[1] - a[1]);
@@ -1722,27 +1722,10 @@ function buildWhyForYou(primary, fallback, state, confidence) {
     vibe: "vibe",
   };
 
-  const directHint = state.direct_only
-    ? "Direct-flight preference is respected in this pick."
-    : "Layovers are allowed to improve overall value when useful.";
-
-  const budgetHint =
-    state.budget_mode === "budget"
-      ? "The package leans toward lower total trip spend."
-      : state.budget_mode === "luxury"
-        ? "The package favors comfort and experience quality."
-        : "The package balances price, travel convenience, and stay quality.";
-
-  const fallbackHint = fallback
-    ? "A fallback is included in case you want a second strong option."
-    : "No fallback shown because this recommendation has a clear lead.";
-
   return [
-    `This pick aligns with your trip intent for ${state.source_city} to ${state.destination_city}.`,
-    `Best overall trade-off: price ${axes.price}/100, location ${axes.location}/100, comfort ${axes.comfort}/100, vibe ${axes.vibe}/100.`,
-    `What you gain: strongest fit on ${axisLabels[bestAxis]}. ${directHint}`,
-    `What you compromise: ${axisLabels[weakAxis]} is the weakest axis for this option.`,
-    `Decision confidence is ${confidence.label.toLowerCase()} (${confidence.score}/100). ${budgetHint} ${fallbackHint}`,
+    `${state.source_city} to ${state.destination_city}: strong overall fit.`,
+    `Top strength: ${axisLabels[bestAxis]}; trade-off: ${axisLabels[weakAxis]}.`,
+    `Confidence ${confidence.score}/100 with balanced package value.`,
   ];
 }
 
@@ -1851,7 +1834,7 @@ function buildDecisionPayload(packages, state, meta = {}) {
 
   return {
     decision,
-    why_for_you: buildWhyForYou(primary, fallback, state, confidence).slice(0, 5),
+    why_for_you: buildWhyForYou(primary, state, confidence).slice(0, 3),
     tradeoff: buildTradeoffPayload(primary, fallback),
   };
 }

@@ -29,6 +29,7 @@ type Flight = {
   return_airline?: string | null;
   return_airline_iata_code?: string | null;
   return_airline_logo_url?: string | null;
+  return_cabin_class?: string | null;
   return_departure_time?: string;
   return_arrival_time?: string;
   return_origin?: string;
@@ -878,6 +879,12 @@ export default function Home() {
                                     <p className="text-sm text-[var(--text-secondary)]">
                                       {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
                                       {pkg.flight.return_destination || pkg.flight.origin}
+                                    </p>
+                                    <p className="text-sm text-[var(--text-secondary)]">
+                                      Cabin:{" "}
+                                      {toTitleCase(
+                                        (pkg.flight.return_cabin_class || pkg.flight.cabin_class || "economy").toLowerCase()
+                                      )}
                                     </p>
                                     <p className="text-sm text-[var(--text-secondary)]">
                                       Departs: {pkg.flight.return_departure_time || "N/A"} | Arrives:{" "}

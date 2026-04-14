@@ -889,6 +889,43 @@ function findAirlineIataCode(flight) {
   return null;
 }
 
+function inferCarrierFromFlightNumbers(flightNumbers) {
+  const labels = Array.isArray(flightNumbers) ? flightNumbers : [];
+
+  for (const rawLabel of labels) {
+    const label = normalizeWhitespace(rawLabel || "");
+    if (!label) continue;
+
+    const nameAndCode = label.match(/^(.*?)\s+([A-Z0-9]{2})\s?\d{1,4}\b/);
+    if (nameAndCode?.[2]) {
+      const name = normalizeWhitespace(nameAndCode[1] || "") || null;
+      const code = nameAndCode[2].toUpperCase();
+      return { name, code };
+    }
+
+    const codeOnly = label.match(/\b([A-Z0-9]{2})\s?\d{1,4}\b/);
+    if (codeOnly?.[1]) {
+      return { name: null, code: codeOnly[1].toUpperCase() };
+    }
+  }
+
+  return { name: null, code: null };
+}
+
+function resolveReturnCarrier(retFlight, outboundFlight) {
+  const inferred = inferCarrierFromFlightNumbers(retFlight?.flight_numbers || []);
+  const retCodeRaw = normalizeWhitespace(retFlight?.airline_iata_code || "").toUpperCase();
+  const retCode = retCodeRaw || null;
+  const inferredCode = inferred.code || null;
+  const codeMismatch = Boolean(inferredCode && retCode && inferredCode !== retCode);
+
+  return {
+    airline: inferred.name || retFlight?.airline || outboundFlight?.airline || "Unknown",
+    airline_iata_code: inferredCode || retCode,
+    airline_logo_url: codeMismatch ? null : retFlight?.airline_logo_url || null,
+  };
+}
+
 function collectAirlineCodesFromFlights(flights) {
   const seen = new Set();
 
@@ -1272,6 +1309,7 @@ async function fetchSerpFlightsOneWay(origin, destination, departureDate, state)
       return_airline: null,
       return_airline_iata_code: null,
       return_airline_logo_url: null,
+      return_cabin_class: null,
       return_flight_numbers: [],
       return_departure_time: "N/A",
       return_arrival_time: "N/A",
@@ -1321,6 +1359,7 @@ async function fetchFlights(origin, destination, state) {
 
     const combined = baseOutbound.map((outbound, index) => {
       const ret = returnBase.length > 0 ? returnBase[index % returnBase.length] : null;
+      const returnCarrier = resolveReturnCarrier(ret, outbound);
       const onward = outbound.price_value;
       const retPrice = ret?.price_value ?? null;
       const total = Number.isFinite(onward) && Number.isFinite(retPrice) ? onward + retPrice : onward ?? null;
@@ -1332,9 +1371,10 @@ async function fetchFlights(origin, destination, state) {
         price_value: total != null ? total : outbound.price_value,
         return_price: ret?.price || "N/A",
         return_price_value: retPrice,
-        return_airline: ret?.airline || outbound.airline,
-        return_airline_iata_code: ret?.airline_iata_code || null,
-        return_airline_logo_url: ret?.airline_logo_url || null,
+        return_airline: returnCarrier.airline,
+        return_airline_iata_code: returnCarrier.airline_iata_code,
+        return_airline_logo_url: returnCarrier.airline_logo_url,
+        return_cabin_class: ret?.cabin_class || outbound.cabin_class || state.class || "economy",
         return_origin: ret?.origin || destination,
         return_destination: ret?.destination || origin,
         return_departure_time: ret?.departure_time || "N/A",
@@ -1362,6 +1402,7 @@ async function fetchFlights(origin, destination, state) {
   const returnBase = rankedReturn.length > 0 ? rankedReturn : [];
   const combined = baseOutbound.map((outbound, index) => {
     const ret = returnBase.length > 0 ? returnBase[index % returnBase.length] : null;
+    const returnCarrier = resolveReturnCarrier(ret, outbound);
     const onward = outbound.price_value;
     const retPrice = ret?.price_value ?? null;
     const total = Number.isFinite(onward) && Number.isFinite(retPrice) ? onward + retPrice : onward ?? null;
@@ -1373,9 +1414,10 @@ async function fetchFlights(origin, destination, state) {
       price_value: total != null ? total : outbound.price_value,
       return_price: ret?.price || "N/A",
       return_price_value: retPrice,
-      return_airline: ret?.airline || outbound.airline,
-      return_airline_iata_code: ret?.airline_iata_code || null,
-      return_airline_logo_url: ret?.airline_logo_url || null,
+      return_airline: returnCarrier.airline,
+      return_airline_iata_code: returnCarrier.airline_iata_code,
+      return_airline_logo_url: returnCarrier.airline_logo_url,
+      return_cabin_class: ret?.cabin_class || outbound.cabin_class || state.class || "economy",
       return_origin: ret?.origin || destination,
       return_destination: ret?.destination || origin,
       return_departure_time: ret?.departure_time || "N/A",

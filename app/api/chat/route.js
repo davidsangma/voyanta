@@ -846,6 +846,16 @@ function isLikelyCountryName(value) {
   return COUNTRY_NAMES.has(normalized);
 }
 
+function isCountryCityOverlap(value) {
+  const normalized = normalizeWhitespace(value || "").toLowerCase();
+  if (!normalized) return false;
+
+  const examples = COUNTRY_CITY_EXAMPLES[normalized];
+  if (!Array.isArray(examples) || examples.length === 0) return false;
+
+  return examples.some((city) => normalizeWhitespace(city || "").toLowerCase() === normalized);
+}
+
 function getCityExamplesForCountry(countryName) {
   const normalized = normalizeWhitespace(countryName || "").toLowerCase();
   const examples = COUNTRY_CITY_EXAMPLES[normalized];
@@ -2167,8 +2177,14 @@ export async function GET(request) {
       });
     }
 
-    if (isLikelyCountryName(state.source_city) || isLikelyCountryName(state.destination_city)) {
-      const countryField = isLikelyCountryName(state.destination_city) ? "destination" : "source";
+    const sourceLooksCountry = isLikelyCountryName(state.source_city);
+    const destinationLooksCountry = isLikelyCountryName(state.destination_city);
+    const sourceIsCountryOnly = sourceLooksCountry && !isCountryCityOverlap(state.source_city);
+    const destinationIsCountryOnly =
+      destinationLooksCountry && !isCountryCityOverlap(state.destination_city);
+
+    if (sourceIsCountryOnly || destinationIsCountryOnly) {
+      const countryField = destinationIsCountryOnly ? "destination" : "source";
       const countryValue = countryField === "destination" ? state.destination_city : state.source_city;
       const cityExamples = getCityExamplesForCountry(countryValue);
       const prompt =

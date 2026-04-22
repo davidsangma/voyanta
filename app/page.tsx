@@ -528,6 +528,12 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--background)] text-[var(--text-primary)]">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-mesh" />
+      <div
+        className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[480px] opacity-40 blur-3xl"
+        style={{ backgroundImage: "url(/hero-gradient.jpg)", backgroundSize: "cover" }}
+        aria-hidden
+      />
       <AppHeader onNewChat={startNewChat} showShadow={isTopShadowVisible} />
 
       {stateSnapshot && (

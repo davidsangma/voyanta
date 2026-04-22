@@ -5,7 +5,10 @@ type UserBubbleProps = {
 export function UserBubble({ text }: UserBubbleProps) {
   return (
     <div className="flex justify-end animate-float-up">
-      <div className="max-w-[88%] rounded-3xl rounded-tr-md border border-[#d7dbe8] bg-[#e9edf4] px-4 py-2 text-[#27304a] shadow-soft sm:max-w-md">
+      <div
+        className="max-w-[80%] rounded-3xl rounded-tr-md px-5 py-3 text-sm font-medium text-white shadow-glow sm:text-base"
+        style={{ backgroundImage: "var(--gradient-bubble-user)" }}
+      >
         {text}
       </div>
     </div>

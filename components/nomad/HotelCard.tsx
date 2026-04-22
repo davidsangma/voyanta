@@ -12,6 +12,7 @@ type HotelCardProps = {
   location?: string | null;
   nights?: number;
   destination?: string | null;
+  imageUrl?: string | null;
 };
 
 export function HotelCard({
@@ -24,8 +25,10 @@ export function HotelCard({
   location,
   nights,
   destination,
+  imageUrl,
 }: HotelCardProps) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const effectiveImageUrl = imageUrl || photoUrl;
 
   useEffect(() => {
     let ignore = false;
@@ -57,9 +60,9 @@ export function HotelCard({
     <div className="overflow-hidden rounded-[22px] border border-[#d4d8e4] bg-[#f2f4f8]">
       <div className="flex flex-col sm:flex-row">
         <div className="relative h-44 w-full overflow-hidden sm:h-auto sm:w-56">
-          {photoUrl ? (
+          {effectiveImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl} alt={name} className="h-full w-full object-cover" loading="lazy" />
+            <img src={effectiveImageUrl} alt={name} className="h-full w-full object-cover" loading="lazy" />
           ) : (
             <div className="h-full w-full bg-[linear-gradient(135deg,#d6dcea,#c8cfdf_45%,#bfc7da)]" />
           )}

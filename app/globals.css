@@ -1,20 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f1e9dd;
-  --foreground: #2b241d;
-  --bg-base: #f1e9dd;
-  --bg-surface: #ffffffe0;
-  --bg-soft: #f7f1e8;
-  --text-primary: #2b241d;
-  --text-secondary: #6e5d4c;
-  --text-muted: #8b7b6a;
-  --accent-rose: #d8a8a1;
-  --accent-rose-soft: #efd7d3;
-  --accent-navy: #2d4b63;
-  --border-soft: #d8ccbc;
-  --shadow-soft: 0 10px 30px rgba(90, 70, 50, 0.16);
-  --shadow-card: 0 6px 20px rgba(90, 70, 50, 0.12);
+  --background: #eef0f5;
+  --foreground: #242a38;
+  --text-primary: #242a38;
+  --text-secondary: #5f6780;
+  --text-muted: #737c97;
+  --border-soft: #d8dce7;
+  --radius: 1.2rem;
+  --shadow-soft: 0 1px 2px rgba(26, 33, 66, 0.05), 0 8px 24px rgba(26, 33, 66, 0.06);
+  --shadow-card: 0 16px 44px -16px rgba(26, 33, 66, 0.22), 0 2px 8px rgba(26, 33, 66, 0.08);
+  --shadow-glow: 0 24px 64px -20px rgba(90, 107, 255, 0.48);
+  --gradient-sunset: linear-gradient(135deg, #ff8f66 0%, #f15b95 52%, #7a68ff 100%);
+  --gradient-ocean: linear-gradient(135deg, #11b2c0 0%, #2d77ff 58%, #1a2d8f 100%);
+  --gradient-aurora: linear-gradient(135deg, #23d4bd 0%, #6f6dff 50%, #ff6d97 100%);
+  --gradient-mesh: none;
+  --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+  --gradient-bubble-user: linear-gradient(135deg, #202d9f, #6047ff);
+  --accent-navy: #233064;
 }
 
 @theme inline {
@@ -28,9 +31,130 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-roboto), "Segoe UI", Helvetica, Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  min-height: 100vh;
+}
+
+a,
+button,
+input,
+textarea,
+select {
+  outline: none;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(96, 71, 255, 0.65);
+  outline-offset: 2px;
 }
 
 .brand-script {
   font-family: "Brush Script MT", "Segoe Script", "Lucida Handwriting", cursive;
   letter-spacing: 0.02em;
+}
+
+.font-display {
+  font-family: var(--font-display), "Times New Roman", serif;
+}
+
+.bg-mesh {
+  background-image: var(--gradient-mesh);
+}
+
+.bg-gradient-sunset {
+  background-image: var(--gradient-sunset);
+}
+
+.bg-gradient-ocean {
+  background-image: var(--gradient-ocean);
+}
+
+.bg-gradient-aurora {
+  background-image: var(--gradient-aurora);
+}
+
+.text-gradient-sunset {
+  background-image: var(--gradient-sunset);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(18px) saturate(168%);
+  -webkit-backdrop-filter: blur(18px) saturate(168%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+.shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+.shadow-glow {
+  box-shadow: var(--shadow-glow);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid #d4d8e5;
+  background: #eceff5;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: #4b536a;
+  transition: all 180ms ease;
+}
+
+.chip:hover {
+  border-color: #bfc5d8;
+  background: #f4f6fb;
+}
+
+@keyframes float-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-float-up {
+  animation: float-up 0.45s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

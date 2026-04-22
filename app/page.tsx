@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
+import { AppHeader } from "@/components/nomad/AppHeader";
+import { ActionChips } from "@/components/nomad/ActionChips";
+import { AssistantBubble } from "@/components/nomad/AssistantBubble";
+import { BestPickCard } from "@/components/nomad/BestPickCard";
+import { BundleCards } from "@/components/nomad/BundleCards";
+import { Composer } from "@/components/nomad/Composer";
+import { FlightSegmentCard } from "@/components/nomad/FlightSegmentCard";
+import { HotelCard } from "@/components/nomad/HotelCard";
+import { PackageSummary } from "@/components/nomad/PackageSummary";
+import { TripContextBar } from "@/components/nomad/TripContextBar";
+import { UserBubble } from "@/components/nomad/UserBubble";
 
 type ApiHistoryMessage = {
   role: "user" | "assistant";
@@ -178,10 +188,19 @@ type EditableStateKey =
   | "direct_only"
   | "budget_mode";
 
-const SESSION_STORAGE_KEY = "travel_ai_session_id_v1";
-const MESSAGE_STORAGE_PREFIX = "travel_ai_messages_v1";
-const STATE_STORAGE_PREFIX = "travel_ai_state_v1";
+const UI_SCHEMA_VERSION = "v2";
+const SESSION_STORAGE_KEY = `travel_ai_session_id_${UI_SCHEMA_VERSION}`;
+const MESSAGE_STORAGE_PREFIX = `travel_ai_messages_${UI_SCHEMA_VERSION}`;
+const STATE_STORAGE_PREFIX = `travel_ai_state_${UI_SCHEMA_VERSION}`;
 const HISTORY_PREVIEW_COUNT = 8;
+const COMPOSER_SUGGESTIONS = [
+  "Only direct flights",
+  "Add hotels",
+  "Switch to business",
+  "Cheaper options",
+  "Compare top 3 flights",
+  "Remove hotel star filter",
+];
 
 function isFollowUpResponse(data: BotPayload): data is FollowUpResponse {
   return "type" in data && data.type === "follow_up";
@@ -196,28 +215,6 @@ function toTitleCase(value: string): string {
     .split("_")
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
-}
-
-function scoreBarTone(score: number): string {
-  if (score >= 75) return "bg-[linear-gradient(90deg,#6cab8f,#4f8f73)]";
-  if (score >= 55) return "bg-[linear-gradient(90deg,#c9b45e,#b5953e)]";
-  return "bg-[linear-gradient(90deg,#d4907f,#bc6c57)]";
-}
-
-function formatStateSummary(state: TripState | null): string {
-  if (!state) return "Start by saying where you want to travel.";
-
-  const source = state.source_city || "Source not set";
-  const destination = state.destination_city || "Destination not set";
-  const date = state.departure_date || "Date not set";
-  const tripType = state.trip_type ? toTitleCase(state.trip_type) : "Trip type not set";
-  const packageMode =
-    state.package_required === "yes" ? "On" : state.package_required === "no" ? "Off" : "Not set";
-  const cabin = state.class ? toTitleCase(state.class) : "Economy";
-  const airline = state.airline_brand || "Any airline";
-  const hotels = state.hotel_required === "yes" ? "On" : "Off";
-
-  return `${source} -> ${destination} | ${date} | ${tripType} | Package: ${packageMode} | ${cabin} | Airline: ${airline} | Hotels: ${hotels}`;
 }
 
 function toApiHistory(messages: ChatMessage[]): ApiHistoryMessage[] {
@@ -520,121 +517,96 @@ export default function Home() {
       ? messages
       : messages.slice(-HISTORY_PREVIEW_COUNT);
 
+  const contextOrigin = stateSnapshot?.source_city || "Source";
+  const contextDestination = stateSnapshot?.destination_city || "Destination";
+  const contextDepartDate = stateSnapshot?.departure_date || "Date";
+  const contextReturnDate = stateSnapshot?.return_date || null;
+  const contextCabin = toTitleCase((stateSnapshot?.class || "economy").toLowerCase());
+  const contextPackageOn = stateSnapshot?.package_required === "yes";
+  const contextHotelsOn = stateSnapshot?.hotel_required === "yes";
+
   return (
-    <div className="min-h-screen bg-[linear-gradient(145deg,#f1e9dd_0%,#eee1d2_55%,#e6d5cd_100%)] text-[var(--text-primary)] flex flex-col">
-      <div
-        className={`sticky top-0 z-40 bg-[linear-gradient(90deg,rgba(216,168,161,0.2),rgba(241,233,221,0.92),rgba(45,75,99,0.08))] backdrop-blur-md border-b border-[var(--border-soft)] transition-shadow duration-200 ${
-          isTopShadowVisible ? "shadow-[var(--shadow-soft)]" : "shadow-none"
-        }`}
-      >
-        <div className="p-4">
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Image
-                src="/voyanta_logo.png"
-                alt="Nomad logo"
-                width={28}
-                height={28}
-                className="object-contain"
-                priority
-              />
-              <div className="leading-tight">
-                <span className="text-lg font-semibold tracking-wide block">Nomad</span>
-                <span className="brand-script text-xs text-[var(--text-muted)] block -mt-0.5">
-                  Worth Exploring
-                </span>
-              </div>
-            </div>
+    <div className="relative flex min-h-screen flex-col bg-[var(--background)] text-[var(--text-primary)]">
+      <AppHeader onNewChat={startNewChat} showShadow={isTopShadowVisible} />
+
+      {stateSnapshot && (
+        <TripContextBar
+          origin={contextOrigin}
+          destination={contextDestination}
+          departDate={contextDepartDate}
+          returnDate={contextReturnDate}
+          cabin={contextCabin}
+          packageOn={contextPackageOn}
+          hotelsOn={contextHotelsOn}
+          showEditor={showStateEditor}
+          onToggleEditor={() => setShowStateEditor((prev) => !prev)}
+        >
+          {[
+            ["source_city", stateSnapshot.source_city || "Source not set"],
+            ["destination_city", stateSnapshot.destination_city || "Destination not set"],
+            ["departure_date", stateSnapshot.departure_date || "Date not set"],
+            ["return_date", stateSnapshot.return_date || "Not set"],
+            ["trip_type", stateSnapshot.trip_type || "not set"],
+            ["package_required", stateSnapshot.package_required || "not set"],
+            ["class", stateSnapshot.class || "economy"],
+            ["airline_brand", stateSnapshot.airline_brand || "any airline"],
+            ["hotel_required", stateSnapshot.hotel_required || "no"],
+            [
+              "hotel_star_rating",
+              stateSnapshot.hotel_star_rating ? `${stateSnapshot.hotel_star_rating} star` : "Any hotel rating",
+            ],
+            ["direct_only", stateSnapshot.direct_only ? "Direct only" : "Layovers allowed"],
+            ["budget_mode", stateSnapshot.budget_mode || "balanced"],
+          ].map(([key, value]) => (
             <button
-              onClick={startNewChat}
-              className="text-sm bg-[linear-gradient(135deg,#f2d8d4,#eac8c4)] border border-[#d7b3ad] rounded-xl px-3 py-2 hover:brightness-95"
+              key={key}
+              onClick={() => {
+                void editStateChip(key as EditableStateKey);
+              }}
+              className="chip"
             >
-              New Chat
+              {toTitleCase(String(key))}: {String(value)}
             </button>
-          </div>
-        </div>
+          ))}
+        </TripContextBar>
+      )}
 
-        {stateSnapshot && (
-          <div className="px-4 py-3 border-t border-[var(--border-soft)] bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(255,255,255,0.58))]">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-xs text-[var(--text-secondary)]">{formatStateSummary(stateSnapshot)}</p>
-                <button
-                  onClick={() => setShowStateEditor((prev) => !prev)}
-                  className="text-xs bg-[linear-gradient(135deg,#f2ddd8,#ecd0ca)] border border-[#d7b3ad] rounded-full px-3 py-1 hover:brightness-95 shrink-0"
-                >
-                  {showStateEditor ? "Hide Edit" : "Edit"}
-                </button>
-              </div>
-
-              {showStateEditor && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {[
-                    ["source_city", stateSnapshot.source_city || "Source not set"],
-                    ["destination_city", stateSnapshot.destination_city || "Destination not set"],
-                    ["departure_date", stateSnapshot.departure_date || "Date not set"],
-                    ["return_date", stateSnapshot.return_date || "Not set"],
-                    ["trip_type", stateSnapshot.trip_type || "not set"],
-                    ["package_required", stateSnapshot.package_required || "not set"],
-                    ["class", stateSnapshot.class || "economy"],
-                    ["airline_brand", stateSnapshot.airline_brand || "any airline"],
-                    ["hotel_required", stateSnapshot.hotel_required || "no"],
-                    [
-                      "hotel_star_rating",
-                      stateSnapshot.hotel_star_rating ? `${stateSnapshot.hotel_star_rating} star` : "Any hotel rating",
-                    ],
-                    ["direct_only", stateSnapshot.direct_only ? "Direct only" : "Layovers allowed"],
-                    ["budget_mode", stateSnapshot.budget_mode || "balanced"],
-                  ].map(([key, value]) => (
-                    <button
-                      key={key}
-                      onClick={() => {
-                        void editStateChip(key as EditableStateKey);
-                      }}
-                      className="text-xs bg-[linear-gradient(135deg,#f7f1e8,#f2e6d8)] border border-[var(--border-soft)] rounded-full px-3 py-1 hover:bg-[#f0d8d2]"
-                    >
-                      {toTitleCase(String(key))}: {String(value)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 pb-36 space-y-6 max-w-3xl mx-auto w-full">
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-5 px-4 py-5 pb-44 sm:px-6 sm:py-6 sm:pb-40">
         {messages.length === 0 && !loading && (
-          <div className="min-h-[48vh] flex items-center justify-center">
-            <div className="max-w-xl w-full bg-[linear-gradient(160deg,rgba(255,255,255,0.84),rgba(252,243,235,0.92))] border border-[#dcbfaf] rounded-2xl p-6 shadow-[0_10px_26px_rgba(106,78,57,0.16)]">
-              <p className="text-xl font-semibold mb-2">Hey, I am Nomad.</p>
-              <p className="text-sm text-[var(--text-secondary)] mb-4">
-                Tell me where you want to go.
-                <br />
-                I will plan the smartest trip for you: flights, hotels, everything.
+          <div className="flex min-h-[50vh] items-center justify-center">
+            <AssistantBubble>
+              <p className="mb-2 font-display text-xl font-medium">
+                Hey, I am Nomad. <span className="text-gradient-sunset">Where to next?</span>
               </p>
-              <p className="text-xs uppercase tracking-wide text-[var(--text-muted)] mb-2">Try something like:</p>
-              <ul className="text-sm text-[var(--text-secondary)] space-y-1">
+              <p className="mb-4 text-sm text-[var(--text-secondary)]">
+                Tell me where you want to go and I will plan flights, hotels, and package options.
+              </p>
+              <p className="mb-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">Try something like:</p>
+              <ul className="space-y-1 text-sm text-[var(--text-secondary)]">
                 <li>- Bangalore to Dubai next month</li>
                 <li>- Cheap trip to Thailand</li>
                 <li>- Luxury Paris vacation</li>
               </ul>
-            </div>
+            </AssistantBubble>
           </div>
         )}
 
         {messages.length > HISTORY_PREVIEW_COUNT && (
           <div className="text-center">
             <button
+              type="button"
               onClick={() => setShowFullHistory((prev) => !prev)}
               className="text-xs text-[var(--text-secondary)] underline"
+              aria-expanded={showFullHistory}
+              aria-label={showFullHistory ? "Hide older messages" : "Show older messages"}
             >
               {showFullHistory ? "Hide older messages" : "Show older messages"}
             </button>
           </div>
         )}
 
-        {visibleMessages.map((message, index) => {
+        <section aria-label="Conversation" role="log" aria-live="polite" aria-relevant="additions text">
+          {visibleMessages.map((message, index) => {
           const messageKey =
             message.role === "user"
               ? `u-${index}-${message.content}`
@@ -646,19 +618,16 @@ export default function Home() {
           const tradeoffAxes = resultPayload?.tradeoff?.axes || null;
           const whyForYou = (resultPayload?.why_for_you || []).slice(0, 3);
 
-          return (
-            <div key={messageKey}>
+            return (
+            <div key={messageKey} className="mb-5 last:mb-0">
               {message.role === "user" && (
-                <div className="flex justify-end">
-                  <div className="bg-white text-black px-4 py-2 rounded-2xl max-w-md">{message.content}</div>
-                </div>
+                <UserBubble text={message.content} />
               )}
 
               {message.role === "bot" && (
-                <div className="flex justify-start">
-                  <div className="bg-[linear-gradient(160deg,rgba(255,255,255,0.8),rgba(253,244,238,0.86))] backdrop-blur border border-[#ddc2b4] p-4 rounded-2xl w-full shadow-[0_8px_20px_rgba(106,78,57,0.12)]">
+                <AssistantBubble variant="card">
                     {isFollowUpResponse(message.data) && (
-                      <div className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] border border-[#dfc9bc] text-[var(--text-primary)] p-3 rounded-xl">
+                      <div className="rounded-xl border border-[#dfc9bc] bg-[#f5efe6] p-3 text-[#2d3345]">
                         {message.data.update_summary && (
                           <p className="text-xs mb-1 text-[var(--text-secondary)]">{message.data.update_summary}</p>
                         )}
@@ -678,96 +647,32 @@ export default function Home() {
                         )}
 
                         {primaryRecommendation && (
-                          <div className="mb-4 bg-[linear-gradient(160deg,#eef8f1,#e6f1ea)] border border-[#bfd8c7] rounded-xl p-4">
-                            <div className="flex items-start justify-between gap-3 mb-2">
-                              <div>
-                                <p className="text-xs uppercase tracking-wide text-[#3b6a55]">Decision-First Pick</p>
-                                <p className="font-semibold">Your Best Pick</p>
-                              </div>
-                              {message.data.decision?.confidence && (
-                                <div className="text-right">
-                                  <p className="text-xs text-[var(--text-secondary)]">Confidence</p>
-                                  <p className="font-semibold">
-                                    {message.data.decision.confidence.label} ({message.data.decision.confidence.score}
-                                    /100)
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="bg-white/70 border border-[#d2e4d7] rounded-lg p-3 mb-3">
-                              <p className="font-semibold">{primaryRecommendation.package.title}</p>
-                              <p className="text-sm text-[var(--text-secondary)]">
-                                Flight: {primaryRecommendation.package.flight.airline} | Hotel:{" "}
-                                {primaryRecommendation.package.hotel.name}
-                              </p>
-                              <p className="font-semibold mt-1">
-                                Total: {primaryRecommendation.package.total_price}
-                              </p>
-                              {message.data.decision?.decision_reasoning && (
-                                <p className="text-sm mt-2 text-[var(--text-secondary)]">
-                                  {message.data.decision.decision_reasoning}
-                                </p>
-                              )}
-                            </div>
-
-                            {whyForYou.length > 0 && (
-                              <div className="mb-3">
-                                <p className="font-semibold mb-1">Why This Is Right For You</p>
-                                <ul className="list-disc list-inside space-y-1 text-sm text-[var(--text-secondary)]">
-                                  {whyForYou.map((line, idx) => (
-                                    <li key={idx}>{line}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-
-                            {tradeoffAxes && (
-                              <div className="space-y-2">
-                                <p className="font-semibold">Trade-off View</p>
-                                {(
-                                  [
-                                    ["price", tradeoffAxes.price],
-                                    ["location", tradeoffAxes.location],
-                                    ["comfort", tradeoffAxes.comfort],
-                                    ["vibe", tradeoffAxes.vibe],
-                                  ] as Array<[string, number]>
-                                ).map(([label, score]) => (
-                                  <div key={label}>
-                                    <div className="flex items-center justify-between text-xs mb-1">
-                                      <span className="capitalize">{label}</span>
-                                      <span>{score}/100</span>
-                                    </div>
-                                    <div className="h-2 rounded-full bg-white/80 border border-[#d6e6dc] overflow-hidden">
-                                      <div
-                                        className={`h-full ${scoreBarTone(score)}`}
-                                        style={{ width: `${Math.max(4, Math.min(100, score))}%` }}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {fallbackRecommendation && (
-                              <div className="mt-3 bg-[linear-gradient(160deg,#f8f4ed,#f3ece1)] border border-[#dccbb5] rounded-lg p-3">
-                                <p className="font-semibold mb-1">Fallback Option</p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  {fallbackRecommendation.package.title}
-                                </p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  Flight: {fallbackRecommendation.package.flight.airline} | Hotel:{" "}
-                                  {fallbackRecommendation.package.hotel.name}
-                                </p>
-                                <p className="font-semibold">{fallbackRecommendation.package.total_price}</p>
-                              </div>
-                            )}
-                          </div>
+                          <BestPickCard
+                            title={primaryRecommendation.package.title}
+                            flight={primaryRecommendation.package.flight.airline}
+                            hotel={primaryRecommendation.package.hotel.name}
+                            total={primaryRecommendation.package.total_price}
+                            destination={resultPayload?.state_snapshot?.destination_city || null}
+                            decisionReasoning={message.data.decision?.decision_reasoning}
+                            confidence={message.data.decision?.confidence || null}
+                            whyForYou={whyForYou}
+                            tradeoffAxes={tradeoffAxes}
+                            fallback={
+                              fallbackRecommendation
+                                ? {
+                                    title: fallbackRecommendation.package.title,
+                                    flight: fallbackRecommendation.package.flight.airline,
+                                    hotel: fallbackRecommendation.package.hotel.name,
+                                    total: fallbackRecommendation.package.total_price,
+                                  }
+                                : null
+                            }
+                          />
                         )}
 
                         <div className={primaryRecommendation ? "opacity-75" : ""}>
                         {primaryRecommendation && (
-                          <p className="text-xs uppercase tracking-wide text-[var(--text-muted)] mb-2">
+                          <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
                             Supporting options
                           </p>
                         )}
@@ -779,152 +684,76 @@ export default function Home() {
                             if (!pkg) return null;
 
                             return (
-                              <div className="mb-4">
-                                <p className="font-semibold mb-2">Your Package</p>
-                                <p className="text-sm text-[var(--text-secondary)] mb-2">{pkg.saving_hint || ""}</p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  This package is selected by combining a high-ranked onward flight, a strong hotel
-                                  value, and a feasible return option.
-                                </p>
-                                <p className="text-sm text-[var(--text-secondary)] mb-2">
-                                  It balances total trip cost and travel convenience for your chosen dates.
-                                </p>
-                                {pkg.nights && (
-                                  <p className="text-sm text-[var(--text-secondary)] mb-2">
-                                    Stay duration: {pkg.nights} night(s)
-                                  </p>
-                                )}
+                              <PackageSummary
+                                savingHint={pkg.saving_hint || undefined}
+                                nights={pkg.nights}
+                                total={pkg.total_price}
+                              >
+                                <FlightSegmentCard
+                                  step={1}
+                                  label="Ongoing Flight"
+                                  airline={pkg.flight.airline}
+                                  airlineCode={pkg.flight.airline_iata_code}
+                                  airlineLogoUrl={pkg.flight.airline_logo_url}
+                                  from={pkg.flight.origin}
+                                  to={pkg.flight.destination}
+                                  duration={pkg.flight.duration}
+                                  cabin={toTitleCase((pkg.flight.cabin_class || "economy").toLowerCase())}
+                                  stopsText={
+                                    pkg.flight.stops_label ||
+                                    `${pkg.flight.stops} stop${pkg.flight.stops === 1 ? "" : "s"}`
+                                  }
+                                  depart={pkg.flight.departure_time || "N/A"}
+                                  flightsText={
+                                    Array.isArray(pkg.flight.outbound_flight_numbers) &&
+                                    pkg.flight.outbound_flight_numbers.length > 0
+                                      ? pkg.flight.outbound_flight_numbers.join(", ")
+                                      : pkg.flight.flight_number || "N/A"
+                                  }
+                                  price={pkg.flight.onward_price || pkg.flight.price}
+                                  variant="success"
+                                />
 
-                                <div className="space-y-2">
-                                  <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
-                                    <p className="font-semibold mb-1">1. Ongoing Flight</p>
-                                    <div className="flex items-center gap-2">
-                                      {pkg.flight.airline_logo_url && (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img
-                                          src={pkg.flight.airline_logo_url}
-                                          alt={`${pkg.flight.airline} logo`}
-                                          width={18}
-                                          height={18}
-                                          className="rounded-sm object-contain"
-                                          loading="lazy"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                      )}
-                                      <p className="font-semibold">
-                                        {pkg.flight.airline}
-                                        {pkg.flight.airline_iata_code ? ` (${pkg.flight.airline_iata_code})` : ""}
-                                      </p>
-                                    </div>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      {pkg.flight.origin} -&gt; {pkg.flight.destination} | {pkg.flight.duration}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Cabin: {toTitleCase((pkg.flight.cabin_class || "economy").toLowerCase())}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      {pkg.flight.stops_label ||
-                                        `${pkg.flight.stops} stop${pkg.flight.stops === 1 ? "" : "s"}`}{" "}
-                                      | Departs: {pkg.flight.departure_time || "N/A"}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Flights:{" "}
-                                      {Array.isArray(pkg.flight.outbound_flight_numbers) &&
-                                      pkg.flight.outbound_flight_numbers.length > 0
-                                        ? pkg.flight.outbound_flight_numbers.join(", ")
-                                        : pkg.flight.flight_number || "N/A"}
-                                    </p>
-                                    <p className="font-semibold">{pkg.flight.onward_price || pkg.flight.price}</p>
-                                  </div>
+                                <HotelCard
+                                  step={2}
+                                  title="Hotel Stay"
+                                  name={pkg.hotel.name}
+                                  rating={pkg.hotel.rating}
+                                  price={pkg.hotel.price}
+                                  link={pkg.hotel.link}
+                                  location={resultPayload?.state_snapshot?.destination_city || null}
+                                  nights={pkg.nights}
+                                  destination={resultPayload?.state_snapshot?.destination_city || null}
+                                />
 
-                                  <div className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] p-3 rounded-lg border border-[#dfc9bc]">
-                                    <p className="font-semibold mb-1">2. Hotel Stay</p>
-                                    <p className="font-semibold">{pkg.hotel.name}</p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Rating: {pkg.hotel.rating ?? "N/A"}
-                                    </p>
-                                    <p className="font-semibold">{pkg.hotel.price}</p>
-                                    <a
-                                      href={pkg.hotel.link}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-[var(--accent-navy)] text-sm"
-                                    >
-                                      View
-                                    </a>
-                                  </div>
-
-                                  <div className="bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] p-3 rounded-lg border border-[#cfe2c8]">
-                                    <p className="font-semibold mb-1">3. Returning Flight</p>
-                                    <div className="flex items-center gap-2">
-                                      {(pkg.flight.return_airline_logo_url || pkg.flight.airline_logo_url) && (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img
-                                          src={pkg.flight.return_airline_logo_url || pkg.flight.airline_logo_url || ""}
-                                          alt={`${pkg.flight.return_airline || pkg.flight.airline} logo`}
-                                          width={18}
-                                          height={18}
-                                          className="rounded-sm object-contain"
-                                          loading="lazy"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                      )}
-                                      <p className="font-semibold">
-                                        {pkg.flight.return_airline || pkg.flight.airline}
-                                        {(pkg.flight.return_airline_iata_code || pkg.flight.airline_iata_code)
-                                          ? ` (${pkg.flight.return_airline_iata_code || pkg.flight.airline_iata_code})`
-                                          : ""}
-                                      </p>
-                                    </div>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      {pkg.flight.return_origin || pkg.flight.destination} -&gt;{" "}
-                                      {pkg.flight.return_destination || pkg.flight.origin}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Cabin:{" "}
-                                      {toTitleCase(
-                                        (pkg.flight.return_cabin_class || pkg.flight.cabin_class || "economy").toLowerCase()
-                                      )}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Departs: {pkg.flight.return_departure_time || "N/A"} | Arrives:{" "}
-                                      {pkg.flight.return_arrival_time || "N/A"}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Flights:{" "}
-                                      {Array.isArray(pkg.flight.return_flight_numbers) &&
-                                      pkg.flight.return_flight_numbers.length > 0
-                                        ? pkg.flight.return_flight_numbers.join(", ")
-                                        : "N/A"}
-                                    </p>
-                                    <p className="font-semibold">{pkg.flight.return_price || "N/A"}</p>
-                                  </div>
-                                </div>
-
-                                <p className="font-semibold mt-2">Package Total: {pkg.total_price}</p>
-                              </div>
+                                <FlightSegmentCard
+                                  step={3}
+                                  label="Returning Flight"
+                                  airline={pkg.flight.return_airline || pkg.flight.airline}
+                                  airlineCode={pkg.flight.return_airline_iata_code || pkg.flight.airline_iata_code}
+                                  airlineLogoUrl={pkg.flight.return_airline_logo_url || pkg.flight.airline_logo_url}
+                                  from={pkg.flight.return_origin || pkg.flight.destination}
+                                  to={pkg.flight.return_destination || pkg.flight.origin}
+                                  cabin={toTitleCase(
+                                    (pkg.flight.return_cabin_class || pkg.flight.cabin_class || "economy").toLowerCase()
+                                  )}
+                                  depart={pkg.flight.return_departure_time || "N/A"}
+                                  arrive={pkg.flight.return_arrival_time || "N/A"}
+                                  flightsText={
+                                    Array.isArray(pkg.flight.return_flight_numbers) &&
+                                    pkg.flight.return_flight_numbers.length > 0
+                                      ? pkg.flight.return_flight_numbers.join(", ")
+                                      : "N/A"
+                                  }
+                                  price={pkg.flight.return_price || "N/A"}
+                                  variant="success"
+                                />
+                              </PackageSummary>
                             );
                           })()}
 
                         {!message.data.meta?.package_requested && (message.data.packages || []).length > 0 && (
-                          <div className="mb-4">
-                            <p className="font-semibold mb-2">Bundles</p>
-                            <div className="space-y-2">
-                              {(message.data.packages || []).slice(0, 3).map((pkg, i) => (
-                                <div
-                                  key={pkg.id || i}
-                                  className="bg-[linear-gradient(160deg,#f5f8ff,#eef3ff)] p-3 rounded-lg border border-[#cfd8f1]"
-                                >
-                                  <p className="font-semibold">{pkg.title}</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">
-                                    Flight: {pkg.flight.airline} | Hotel: {pkg.hotel.name}
-                                  </p>
-                                  <p className="text-sm text-[var(--text-secondary)]">{pkg.saving_hint || ""}</p>
-                                  <p className="font-semibold">Total: {pkg.total_price}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                          <BundleCards items={message.data.packages || []} />
                         )}
 
                         {!message.data.meta?.package_requested && <div className="mb-4">
@@ -937,76 +766,44 @@ export default function Home() {
                           )}
                           <div className="space-y-2">
                             {(message.data.best_flights || []).slice(0, 3).map((flight, i) => (
-                              <div
+                              <FlightSegmentCard
                                 key={i}
-                                className={`relative p-3 rounded-lg border ${
-                                  i === 0
-                                    ? "bg-[linear-gradient(160deg,#f4fbf3,#edf7ea)] border-[#cfe2c8]"
-                                    : "bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] border-[#dfc9bc]"
-                                }`}
-                              >
-                                {flight.trip_type === "round_trip" && (
-                                  <div className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full bg-white/80 border border-[#dfc9bc] p-1">
-                                    <Image
-                                      src="/round-trip-icon.svg"
-                                      alt="Round trip"
-                                      width={14}
-                                      height={14}
-                                      className="object-contain"
-                                    />
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-2">
-                                  {flight.airline_logo_url && (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={flight.airline_logo_url}
-                                      alt={`${flight.airline} logo`}
-                                      width={18}
-                                      height={18}
-                                      className="rounded-sm object-contain"
-                                      loading="lazy"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  )}
-                                  <p className="font-semibold">
-                                    {flight.airline}
-                                    {flight.airline_iata_code ? ` (${flight.airline_iata_code})` : ""}
-                                  </p>
-                                </div>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  {flight.origin} -&gt; {flight.destination} | {flight.duration}
-                                </p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  Cabin: {toTitleCase((flight.cabin_class || "economy").toLowerCase())}
-                                </p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  {flight.stops_label || `${flight.stops} stop${flight.stops === 1 ? "" : "s"}`} | Departs: {flight.departure_time || "N/A"}
-                                </p>
-                                <p className="text-sm text-[var(--text-secondary)]">
-                                  Flights:{" "}
-                                  {Array.isArray(flight.flight_numbers) && flight.flight_numbers.length > 0
+                                airline={flight.airline}
+                                airlineCode={flight.airline_iata_code}
+                                airlineLogoUrl={flight.airline_logo_url}
+                                from={flight.origin}
+                                to={flight.destination}
+                                duration={flight.duration}
+                                cabin={toTitleCase((flight.cabin_class || "economy").toLowerCase())}
+                                stopsText={
+                                  flight.stops_label ||
+                                  `${flight.stops} stop${flight.stops === 1 ? "" : "s"}`
+                                }
+                                depart={flight.departure_time || "N/A"}
+                                flightsText={
+                                  Array.isArray(flight.flight_numbers) && flight.flight_numbers.length > 0
                                     ? flight.flight_numbers.join(", ")
-                                    : flight.flight_number || "N/A"}
-                                </p>
-                                {flight.trip_type === "round_trip" && (
-                                  <>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Return: {flight.return_origin || flight.destination} -&gt;{" "}
-                                      {flight.return_destination || flight.origin} | Departs:{" "}
-                                      {flight.return_departure_time || "N/A"}
-                                    </p>
-                                    <p className="text-sm text-[var(--text-secondary)]">
-                                      Return flights:{" "}
-                                      {Array.isArray(flight.return_flight_numbers) &&
+                                    : flight.flight_number || "N/A"
+                                }
+                                returnText={
+                                  flight.trip_type === "round_trip"
+                                    ? `${flight.return_origin || flight.destination} -> ${
+                                        flight.return_destination || flight.origin
+                                      } | Departs: ${flight.return_departure_time || "N/A"}`
+                                    : undefined
+                                }
+                                returnFlightsText={
+                                  flight.trip_type === "round_trip"
+                                    ? Array.isArray(flight.return_flight_numbers) &&
                                       flight.return_flight_numbers.length > 0
-                                        ? flight.return_flight_numbers.join(", ")
-                                        : "N/A"}
-                                    </p>
-                                  </>
-                                )}
-                                <p className="font-semibold">{flight.price}</p>
-                              </div>
+                                      ? flight.return_flight_numbers.join(", ")
+                                      : "N/A"
+                                    : undefined
+                                }
+                                showRoundTripBadge={flight.trip_type === "round_trip"}
+                                price={flight.price}
+                                variant={i === 0 ? "success" : "neutral"}
+                              />
                             ))}
                           </div>
                         </div>}
@@ -1022,19 +819,15 @@ export default function Home() {
                             )}
                             <div className="space-y-2">
                               {(message.data.hotels || []).slice(0, 3).map((hotel, i) => (
-                                <div key={i} className="bg-[linear-gradient(160deg,#fbf6ef,#f7eee5)] p-3 rounded-lg border border-[#dfc9bc]">
-                                  <p className="font-semibold">{hotel.name}</p>
-                                  <p className="text-sm text-[var(--text-secondary)]">Rating: {hotel.rating ?? "N/A"}</p>
-                                  <p className="font-semibold">{hotel.price}</p>
-                                  <a
-                                    href={hotel.link}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-[var(--accent-navy)] text-sm"
-                                  >
-                                    View
-                                  </a>
-                                </div>
+                                <HotelCard
+                                  key={i}
+                                  name={hotel.name}
+                                  rating={hotel.rating}
+                                  price={hotel.price}
+                                  link={hotel.link}
+                                  location={resultPayload?.state_snapshot?.destination_city || null}
+                                  destination={resultPayload?.state_snapshot?.destination_city || null}
+                                />
                               ))}
                             </div>
                           </div>
@@ -1052,60 +845,46 @@ export default function Home() {
                         )}
 
                         {Array.isArray(message.data.actions) && message.data.actions.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {message.data.actions.slice(0, 4).map((action, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => {
-                                  void applyQuickAction(action);
-                                }}
-                                className="text-xs bg-[linear-gradient(135deg,#f2ddd8,#ecd0ca)] border border-[#d7b3ad] rounded-full px-3 py-1 hover:brightness-95"
-                              >
-                                {action}
-                              </button>
-                            ))}
-                          </div>
+                          <ActionChips
+                            items={message.data.actions}
+                            onAction={(action) => {
+                              void applyQuickAction(action);
+                            }}
+                          />
                         )}
                         </div>
                       </>
                     )}
-                  </div>
-                </div>
+                </AssistantBubble>
               )}
             </div>
-          );
-        })}
+            );
+          })}
+        </section>
 
-        {loading && <div className="text-[var(--text-muted)] animate-pulse">Thinking...</div>}
-      </div>
-
-      <div className="sticky bottom-0 p-4 border-t border-[var(--border-soft)] bg-[linear-gradient(90deg,rgba(241,233,221,0.95),rgba(243,230,219,0.97),rgba(236,218,210,0.95))] backdrop-blur-md">
-        <div className="flex gap-2 max-w-3xl mx-auto">
-          <input
-            className="flex-1 p-3 rounded-xl bg-white/90 border border-[#dcbfaf] outline-none focus:border-[#d3a8a0]"
-            placeholder="Ask your travel plan..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                void sendMessage();
-              }
-            }}
-          />
-          <button
-            onClick={() => {
-              void sendMessage();
-            }}
-            disabled={loading || !sessionId}
-            className="bg-[linear-gradient(135deg,#f2d8d4,#eac8c4)] text-[var(--text-primary)] px-4 rounded-xl border border-[#d7b3ad] hover:brightness-95 disabled:opacity-60"
+        {loading && (
+          <div
+            className="inline-flex rounded-full border border-[var(--border-soft)] bg-white/75 px-3 py-1 text-xs text-[var(--text-muted)] animate-pulse"
+            role="status"
+            aria-live="polite"
           >
-            Send
-          </button>
-        </div>
-        <p className="max-w-3xl mx-auto mt-2 text-[11px] text-[var(--text-muted)]">
-          Ask naturally: &quot;only direct&quot;, &quot;add hotels&quot;, &quot;switch to business&quot;, &quot;cheaper options&quot;.
-        </p>
-      </div>
+            Thinking...
+          </div>
+        )}
+      </main>
+
+      <Composer
+        value={input}
+        onChange={setInput}
+        onSend={() => {
+          void sendMessage();
+        }}
+        onSuggestion={(suggestion) => {
+          void applyQuickAction(suggestion);
+        }}
+        suggestions={COMPOSER_SUGGESTIONS}
+        disabled={loading || !sessionId}
+      />
     </div>
   );
 }

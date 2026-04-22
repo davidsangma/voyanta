@@ -1475,9 +1475,12 @@ function applyDomesticFlightRealism(flights, state, routeContext) {
   // Keep fallback inventory if strict realism removes everything.
   if (plausible.length === 0) return flights;
 
-  // For domestic routes, once we have any plausible options, keep only plausible options.
-  // This prevents long-haul multi-stop options from bubbling back due to ranking.
-  return plausible;
+  // Keep fallback inventory, but make plausible options appear first.
+  const plausibleSet = new Set(plausible.map((f) => `${f.airline}-${f.flight_number}-${f.departure_time}`));
+  const extras = flights.filter(
+    (f) => !plausibleSet.has(`${f.airline}-${f.flight_number}-${f.departure_time}`)
+  );
+  return [...plausible, ...extras];
 }
 
 function rankFlights(flights, state, routeContext = null) {
@@ -1669,8 +1672,10 @@ async function fetchFlights(origin, destination, state) {
   const realismFiltered = applyDomesticFlightRealism(airlineFiltered, state, routeContext);
   const realismFilteredReturn = applyDomesticFlightRealism(returnAirlineFiltered, state, routeContext);
 
-  const ranked = rankFlights(realismFiltered, state, routeContext);
-  const rankedReturn = rankFlights(realismFilteredReturn, state, routeContext);
+  const rankedRaw = rankFlights(realismFiltered, state, routeContext);
+  const rankedReturnRaw = rankFlights(realismFilteredReturn, state, routeContext);
+  const ranked = applyDomesticFlightRealism(rankedRaw, state, routeContext);
+  const rankedReturn = applyDomesticFlightRealism(rankedReturnRaw, state, routeContext);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
     const baseOutbound = directOnly.length > 0 ? directOnly.slice(0, 5) : ranked.slice(0, 5);

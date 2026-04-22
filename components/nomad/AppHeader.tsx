@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { NomadPlaneMark } from "@/components/nomad/NomadPlaneMark";
 
 type AppHeaderProps = {
   onNewChat: () => void;
@@ -15,7 +15,7 @@ export function AppHeader({ onNewChat, showShadow }: AppHeaderProps) {
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-aurora shadow-glow">
-            <Image src="/voyanta_logo.png" alt="Nomad logo" width={20} height={20} className="object-contain brightness-0 invert" priority />
+            <NomadPlaneMark className="h-5 w-5 text-white" />
             <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-secondary ring-2 ring-background" />
           </div>
           <div className="leading-tight">
@@ -27,10 +27,13 @@ export function AppHeader({ onNewChat, showShadow }: AppHeaderProps) {
         <button
           type="button"
           onClick={onNewChat}
-          className="rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90"
+          className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background hover:bg-foreground/90"
           aria-label="Start a new chat"
         >
-          ✦ New Chat
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 3l1.8 3.7L16 8l-3 2.9.7 4.1-3.7-1.9-3.7 1.9.7-4.1L4 8l4.2-1.3L10 3z" fill="currentColor" />
+          </svg>
+          New Chat
         </button>
       </div>
     </header>

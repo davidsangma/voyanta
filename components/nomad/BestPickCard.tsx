@@ -74,10 +74,14 @@ export function BestPickCard({
 
   return (
     <div className="mb-4 group overflow-hidden rounded-3xl bg-card shadow-card ring-1 ring-border/60 animate-scale-in">
-      <div
-        className="relative h-48 overflow-hidden bg-[linear-gradient(120deg,#384554_0%,#7f6f61_48%,#2a313d_100%)] bg-cover bg-center sm:h-56"
-        style={destination && heroImageUrl ? { backgroundImage: `url(${heroImageUrl})` } : { backgroundImage: "url(/destination-goa.jpg)" }}
-      >
+      <div className="relative h-48 overflow-hidden bg-[linear-gradient(120deg,#384554_0%,#7f6f61_48%,#2a313d_100%)] sm:h-56">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={destination && heroImageUrl ? heroImageUrl : "/destination-goa.jpg"}
+          alt={destination ? `${destination} destination` : "Destination"}
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 group-active:scale-[1.03]"
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-foreground/85 via-foreground/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 flex items-end justify-between p-5">
           <div>

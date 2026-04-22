@@ -65,7 +65,7 @@ export function HotelCard({
             src={effectiveImageUrl}
             alt={name}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 group-active:scale-[1.03]"
           />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
@@ -73,7 +73,7 @@ export function HotelCard({
             src="/hotel-seaview.jpg"
             alt={name}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 group-active:scale-[1.03]"
           />
         )}
 

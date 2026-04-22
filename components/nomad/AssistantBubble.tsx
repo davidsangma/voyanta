@@ -24,7 +24,7 @@ export function AssistantBubble({ children, variant = "text" }: AssistantBubbleP
             {children}
           </div>
         ) : (
-          <div className="w-full rounded-3xl rounded-tl-md bg-[var(--gradient-card)] p-3.5 shadow-card ring-1 ring-[var(--border-soft)] sm:p-4">
+          <div className="w-full rounded-3xl rounded-tl-md bg-[var(--gradient-card)] p-3.5 text-[#2d3345] shadow-card ring-1 ring-[var(--border-soft)] sm:p-4">
             {children}
           </div>
         )}

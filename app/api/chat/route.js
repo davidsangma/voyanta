@@ -1475,15 +1475,9 @@ function applyDomesticFlightRealism(flights, state, routeContext) {
   // Keep fallback inventory if strict realism removes everything.
   if (plausible.length === 0) return flights;
 
-  // If we have enough plausible options, restrict to them entirely.
-  if (plausible.length >= 3) return plausible;
-
-  // Otherwise prefer plausible options first, then keep extras for resiliency.
-  const plausibleSet = new Set(plausible.map((f) => `${f.airline}-${f.flight_number}-${f.departure_time}`));
-  const extras = flights.filter(
-    (f) => !plausibleSet.has(`${f.airline}-${f.flight_number}-${f.departure_time}`)
-  );
-  return [...plausible, ...extras];
+  // For domestic routes, once we have any plausible options, keep only plausible options.
+  // This prevents long-haul multi-stop options from bubbling back due to ranking.
+  return plausible;
 }
 
 function rankFlights(flights, state, routeContext = null) {

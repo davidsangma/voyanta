@@ -9,7 +9,7 @@ import { BundleCards } from "@/components/nomad/BundleCards";
 import { Composer } from "@/components/nomad/Composer";
 import { FlightSegmentCard } from "@/components/nomad/FlightSegmentCard";
 import { HotelCard } from "@/components/nomad/HotelCard";
-import { PackageSummary } from "@/components/nomad/PackageSummary";
+import { PackageRecapCard } from "@/components/nomad/PackageRecapCard";
 import { TripContextBar } from "@/components/nomad/TripContextBar";
 import { UserBubble } from "@/components/nomad/UserBubble";
 
@@ -55,6 +55,7 @@ type Hotel = {
   rating: number | null;
   price: string;
   link: string;
+  image_url?: string | null;
 };
 
 type TravelPackage = {
@@ -629,11 +630,11 @@ export default function Home() {
                     {isFollowUpResponse(message.data) && (
                       <div className="rounded-xl border border-[#dfc9bc] bg-[#f5efe6] p-3 text-[#2d3345]">
                         {message.data.update_summary && (
-                          <p className="text-xs mb-1 text-[var(--text-secondary)]">{message.data.update_summary}</p>
+                          <p className="mb-1 text-xs text-[#6a7691]">{message.data.update_summary}</p>
                         )}
-                        <p>{message.data.message}</p>
+                        <p className="text-[15px] leading-snug text-[#2d3345] sm:text-[17px]">{message.data.message}</p>
                         {message.data.debug && (
-                          <p className="text-xs mt-2 text-[var(--text-secondary)]">
+                          <p className="mt-2 text-xs text-[#6a7691]">
                             Debug: {JSON.stringify(message.data.debug)}
                           </p>
                         )}
@@ -684,11 +685,7 @@ export default function Home() {
                             if (!pkg) return null;
 
                             return (
-                              <PackageSummary
-                                savingHint={pkg.saving_hint || undefined}
-                                nights={pkg.nights}
-                                total={pkg.total_price}
-                              >
+                              <div className="space-y-4">
                                 <FlightSegmentCard
                                   step={1}
                                   label="Ongoing Flight"
@@ -724,6 +721,7 @@ export default function Home() {
                                   location={resultPayload?.state_snapshot?.destination_city || null}
                                   nights={pkg.nights}
                                   destination={resultPayload?.state_snapshot?.destination_city || null}
+                                  imageUrl={pkg.hotel.image_url || null}
                                 />
 
                                 <FlightSegmentCard
@@ -748,7 +746,13 @@ export default function Home() {
                                   price={pkg.flight.return_price || "N/A"}
                                   variant="success"
                                 />
-                              </PackageSummary>
+                                <PackageRecapCard
+                                  total={pkg.total_price}
+                                  nights={pkg.nights}
+                                  savingHint={pkg.saving_hint || undefined}
+                                  summary={message.data.decision?.decision_reasoning}
+                                />
+                              </div>
                             );
                           })()}
 
@@ -827,6 +831,7 @@ export default function Home() {
                                   link={hotel.link}
                                   location={resultPayload?.state_snapshot?.destination_city || null}
                                   destination={resultPayload?.state_snapshot?.destination_city || null}
+                                  imageUrl={hotel.image_url || null}
                                 />
                               ))}
                             </div>

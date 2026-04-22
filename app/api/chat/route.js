@@ -2603,6 +2603,30 @@ export async function GET(request) {
       direct_fallback_used: flightResult.direct_fallback_used,
     });
 
+    if (state.package_required === "yes" && packages.length === 0) {
+      let message =
+        "I could not build a complete package yet. Try allowing layovers, broadening dates, or relaxing hotel filters.";
+
+      if (flightResult.flights.length === 0) {
+        message = state.direct_only
+          ? "I could not find flights that match the current constraints. Try allowing layovers or adjusting dates."
+          : "I could not find flights for this route/date. Try nearby dates or a different airport pair.";
+      } else if (hotelRequested && hotels.length === 0) {
+        message = state.hotel_star_rating
+          ? "I found flights, but no hotels match your current star/brand filters. Try removing hotel star or brand filter."
+          : "I found flights, but could not find hotel options for this destination/date. Try nearby dates.";
+      }
+
+      return json({
+        type: "follow_up",
+        intent_detected: intent,
+        message,
+        update_summary: updateSummary,
+        state_snapshot: state,
+        actions: buildActions(state),
+      });
+    }
+
     return json({
       type: "result",
       intent_detected: intent,

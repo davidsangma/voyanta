@@ -762,6 +762,16 @@ export default function Home() {
                             );
                           })()}
 
+                        {message.data.meta?.package_requested &&
+                          (message.data.packages || []).length === 0 && (
+                          <div className="rounded-xl border border-[#dfc9bc] bg-[#f5efe6] p-3 text-[#2d3345]">
+                            <p className="text-[15px] leading-snug sm:text-[17px]">
+                              I could not build a complete package with current filters. Try allowing layovers,
+                              removing hotel filters, or changing dates.
+                            </p>
+                          </div>
+                        )}
+
                         {!message.data.meta?.package_requested && (message.data.packages || []).length > 0 && (
                           <BundleCards items={message.data.packages || []} />
                         )}

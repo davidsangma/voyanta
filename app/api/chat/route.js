@@ -154,6 +154,66 @@ const LUXURY_HOTEL_CHAINS = [
   "Edition",
   "Jumeirah",
 ];
+const INDIAN_AIRPORT_CODES = new Set([
+  "BLR",
+  "BOM",
+  "DEL",
+  "GOI",
+  "GOX",
+  "HYD",
+  "MAA",
+  "CCU",
+  "COK",
+  "TRV",
+  "TRZ",
+  "PNQ",
+  "AMD",
+  "JAI",
+  "GAU",
+  "IXC",
+  "LKO",
+  "PAT",
+  "SXR",
+  "IDR",
+  "NAG",
+  "BBI",
+  "VTZ",
+  "IMF",
+  "IXB",
+  "RPR",
+  "BHO",
+  "UDR",
+  "JDH",
+  "ATQ",
+  "IXM",
+  "CJB",
+  "VNS",
+  "GOP",
+  "IXE",
+]);
+const DOMESTIC_INDIAN_CARRIER_HINTS = [
+  "indigo",
+  "air india",
+  "air india express",
+  "vistara",
+  "akasa",
+  "spicejet",
+  "alliance air",
+  "go first",
+];
+const LONG_HAUL_CARRIER_HINTS = [
+  "qatar",
+  "emirates",
+  "etihad",
+  "lufthansa",
+  "british airways",
+  "klm",
+  "air france",
+  "singapore airlines",
+  "turkish",
+  "swiss",
+  "ita",
+];
 
 const duffelAirlineCache = {
   byCode: new Map(),
@@ -485,6 +545,44 @@ function isLuxuryIntent(state) {
   return state?.budget_mode === "luxury" || Number(state?.hotel_star_rating) >= 5;
 }
 
+function isIndianCityName(value) {
+  return /\b(india|goa|delhi|new delhi|mumbai|bangalore|bengaluru|chennai|hyderabad|kolkata|pune)\b/.test(
+    simplifyBrandText(value || "")
+  );
+}
+
+function isDomesticIndiaRoute(state, originCode, destinationCode) {
+  const sourceCity = state?.source_city || "";
+  const destinationCity = state?.destination_city || "";
+  if (isIndianCityName(sourceCity) && isIndianCityName(destinationCity)) return true;
+
+  const origin = normalizeWhitespace(originCode || "").toUpperCase();
+  const destination = normalizeWhitespace(destinationCode || "").toUpperCase();
+  return INDIAN_AIRPORT_CODES.has(origin) && INDIAN_AIRPORT_CODES.has(destination);
+}
+
+function buildRouteContext(state, originCode, destinationCode) {
+  return {
+    domestic_india: isDomesticIndiaRoute(state, originCode, destinationCode),
+  };
+}
+
+function cabinImpliesLuxuryHotels(state) {
+  return ["business", "first"].includes(String(state?.class || "").toLowerCase());
+}
+
+function applyHotelExpectationRealism(state) {
+  const next = normalizeStateSnapshot(state);
+  if (!cabinImpliesLuxuryHotels(next)) return next;
+  if (next.hotel_required === "no" && next.package_required !== "yes") return next;
+
+  if (next.hotel_required !== "yes") setSlot(next, "hotel_required", "yes", "inferred");
+  if (Number(next.hotel_star_rating || 0) < 5) setSlot(next, "hotel_star_rating", 5, "inferred");
+  if (next.budget_mode !== "luxury") setSlot(next, "budget_mode", "luxury", "inferred");
+
+  return next;
+}
+
 function parsePositiveEnvNumber(key, fallback) {
   const raw = process.env[key];
   const value = Number(raw);
@@ -786,6 +884,9 @@ function applyRuleOverrides(state, history, preferences) {
   } else if (requestedAirline) {
     setSlot(state, "airline_brand", requestedAirline, "confirmed");
   }
+
+  const cabinAdjusted = applyHotelExpectationRealism(state);
+  Object.assign(state, cabinAdjusted);
 }
 
 function buildSystemPrompt(todayIso, currentState) {
@@ -910,7 +1011,8 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
     clearSlot(next, "hotel_brand");
   }
 
-  return next;
+  const cabinAdjusted = applyHotelExpectationRealism(next);
+  return cabinAdjusted;
 }
 
 function validateState(state) {
@@ -1304,7 +1406,40 @@ function normalizeScore(values, index, inverse = false) {
   return inverse ? 1 - normalized : normalized;
 }
 
-function rankFlights(flights, state) {
+function getDomesticRealismPenalty(flight, routeContext) {
+  if (!routeContext?.domestic_india) return 0;
+
+  const stops = Number.isFinite(flight?.stops) ? flight.stops : 0;
+  const duration = Number.isFinite(flight?.duration_value) ? flight.duration_value : Number.MAX_SAFE_INTEGER / 10;
+  const labels = [
+    flight?.airline,
+    flight?.airline_iata_code,
+    ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : []),
+  ]
+    .map((value) => simplifyBrandText(value || ""))
+    .filter(Boolean)
+    .join(" ");
+
+  let penalty = 0;
+
+  if (stops >= 2) penalty += 0.38;
+  else if (stops === 1) penalty += 0.16;
+
+  if (duration >= 9 * 60) penalty += 0.26;
+  else if (duration >= 6 * 60) penalty += 0.12;
+
+  if (LONG_HAUL_CARRIER_HINTS.some((carrier) => labels.includes(simplifyBrandText(carrier)))) {
+    penalty += stops > 0 ? 0.3 : 0.16;
+  }
+
+  if (DOMESTIC_INDIAN_CARRIER_HINTS.some((carrier) => labels.includes(simplifyBrandText(carrier)))) {
+    penalty -= stops === 0 ? 0.1 : 0.04;
+  }
+
+  return penalty;
+}
+
+function rankFlights(flights, state, routeContext = null) {
   if (!flights.length) return [];
 
   const weights = { price: 0.45, duration: 0.35, stops: 0.2 };
@@ -1336,7 +1471,8 @@ function rankFlights(flights, state) {
       _score:
         normalizeScore(prices, index) * weights.price +
         normalizeScore(durations, index) * weights.duration +
-        normalizeScore(stops, index) * weights.stops,
+        normalizeScore(stops, index) * weights.stops +
+        getDomesticRealismPenalty(flight, routeContext),
     }))
     .sort((a, b) => a._score - b._score)
     .map((item) => {
@@ -1468,6 +1604,7 @@ async function fetchSerpFlightsOneWay(origin, destination, departureDate, state)
 }
 
 async function fetchFlights(origin, destination, state) {
+  const routeContext = buildRouteContext(state, origin, destination);
   const outboundRaw = await fetchSerpFlightsOneWay(origin, destination, state.departure_date, state).catch(
     () => []
   );
@@ -1488,8 +1625,8 @@ async function fetchFlights(origin, destination, state) {
       ? enrichedReturn.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
       : enrichedReturn;
 
-  const ranked = rankFlights(airlineFiltered, state);
-  const rankedReturn = rankFlights(returnAirlineFiltered, state);
+  const ranked = rankFlights(airlineFiltered, state, routeContext);
+  const rankedReturn = rankFlights(returnAirlineFiltered, state, routeContext);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
     const baseOutbound = directOnly.length > 0 ? directOnly.slice(0, 5) : ranked.slice(0, 5);
@@ -2168,25 +2305,26 @@ async function fetchHotelsFromBookingApi(state) {
 }
 
 async function fetchHotels(state) {
+  const effectiveState = applyHotelExpectationRealism(state);
   const [serpHotelsRaw, bookingHotelsRaw] = await Promise.all([
-    fetchHotelsFromSerpApi(state).catch(() => []),
-    fetchHotelsFromBookingApi(state).catch(() => []),
+    fetchHotelsFromSerpApi(effectiveState).catch(() => []),
+    fetchHotelsFromBookingApi(effectiveState).catch(() => []),
   ]);
 
   const mergedHotels = dedupeHotels([...serpHotelsRaw, ...bookingHotelsRaw]);
   let hotels = mergedHotels;
 
-  if (state.hotel_star_rating) {
-    hotels = hotels.filter((h) => meetsHotelStarConstraint(h, state.hotel_star_rating));
+  if (effectiveState.hotel_star_rating) {
+    hotels = hotels.filter((h) => meetsHotelStarConstraint(h, effectiveState.hotel_star_rating));
   }
 
-  if (state.hotel_brand) {
-    hotels = hotels.filter((h) => matchesHotelBrand(h, state.hotel_brand));
+  if (effectiveState.hotel_brand) {
+    hotels = hotels.filter((h) => matchesHotelBrand(h, effectiveState.hotel_brand));
   }
 
   let luxuryRelaxReason = null;
-  if (isLuxuryIntent(state)) {
-    const luxuryPlausible = hotels.filter((hotel) => meetsLuxuryPlausibility(hotel, state));
+  if (isLuxuryIntent(effectiveState)) {
+    const luxuryPlausible = hotels.filter((hotel) => meetsLuxuryPlausibility(hotel, effectiveState));
     if (luxuryPlausible.length > 0) {
       hotels = luxuryPlausible;
     } else if (hotels.length > 0) {
@@ -2197,22 +2335,22 @@ async function fetchHotels(state) {
 
   if (hotels.length > 0) {
     return {
-      hotels: rankHotels(hotels, state).slice(0, 5),
+      hotels: rankHotels(hotels, effectiveState).slice(0, 5),
       hotel_filter_relaxed: Boolean(luxuryRelaxReason),
       hotel_relax_reason: luxuryRelaxReason,
     };
   }
 
   // If star filter is too restrictive, keep brand filter and relax only star rating.
-  if (state.hotel_star_rating) {
+  if (effectiveState.hotel_star_rating) {
     let relaxed = mergedHotels;
-    if (state.hotel_brand) {
-      relaxed = relaxed.filter((h) => matchesHotelBrand(h, state.hotel_brand));
+    if (effectiveState.hotel_brand) {
+      relaxed = relaxed.filter((h) => matchesHotelBrand(h, effectiveState.hotel_brand));
     }
 
     if (relaxed.length > 0) {
       return {
-        hotels: rankHotels(relaxed, state).slice(0, 5),
+        hotels: rankHotels(relaxed, effectiveState).slice(0, 5),
         hotel_filter_relaxed: true,
         hotel_relax_reason: "removed_hotel_star_rating",
       };

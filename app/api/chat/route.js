@@ -155,6 +155,7 @@ const LUXURY_HOTEL_CHAINS = [
   "Jumeirah",
 ];
 const INDIAN_AIRPORT_CODES = new Set([
+  "GOA",
   "BLR",
   "BOM",
   "DEL",
@@ -1439,6 +1440,52 @@ function getDomesticRealismPenalty(flight, routeContext) {
   return penalty;
 }
 
+function applyDomesticFlightRealism(flights, state, routeContext) {
+  if (!routeContext?.domestic_india) return flights;
+  if (!Array.isArray(flights) || flights.length <= 1) return flights;
+  if (state?.airline_brand) return flights;
+
+  const maxDurationMinutes = state?.class === "business" || state?.class === "first" ? 11 * 60 : 9 * 60;
+
+  const plausible = flights.filter((flight) => {
+    const stops = Number.isFinite(flight?.stops) ? flight.stops : 0;
+    const duration = Number.isFinite(flight?.duration_value) ? flight.duration_value : Number.MAX_SAFE_INTEGER / 10;
+    const labels = [
+      flight?.airline,
+      flight?.airline_iata_code,
+      ...(Array.isArray(flight?.flight_numbers) ? flight.flight_numbers : []),
+    ]
+      .map((value) => simplifyBrandText(value || ""))
+      .filter(Boolean)
+      .join(" ");
+
+    const longHaulCarrier = LONG_HAUL_CARRIER_HINTS.some((carrier) =>
+      labels.includes(simplifyBrandText(carrier))
+    );
+    const tooManyStops = stops >= 2;
+    const tooLong = duration > maxDurationMinutes;
+
+    if (longHaulCarrier && stops > 0) return false;
+    if (tooManyStops) return false;
+    if (tooLong && stops > 0) return false;
+
+    return true;
+  });
+
+  // Keep fallback inventory if strict realism removes everything.
+  if (plausible.length === 0) return flights;
+
+  // If we have enough plausible options, restrict to them entirely.
+  if (plausible.length >= 3) return plausible;
+
+  // Otherwise prefer plausible options first, then keep extras for resiliency.
+  const plausibleSet = new Set(plausible.map((f) => `${f.airline}-${f.flight_number}-${f.departure_time}`));
+  const extras = flights.filter(
+    (f) => !plausibleSet.has(`${f.airline}-${f.flight_number}-${f.departure_time}`)
+  );
+  return [...plausible, ...extras];
+}
+
 function rankFlights(flights, state, routeContext = null) {
   if (!flights.length) return [];
 
@@ -1625,8 +1672,11 @@ async function fetchFlights(origin, destination, state) {
       ? enrichedReturn.filter((flight) => matchesAirlineBrand(flight, state.airline_brand))
       : enrichedReturn;
 
-  const ranked = rankFlights(airlineFiltered, state, routeContext);
-  const rankedReturn = rankFlights(returnAirlineFiltered, state, routeContext);
+  const realismFiltered = applyDomesticFlightRealism(airlineFiltered, state, routeContext);
+  const realismFilteredReturn = applyDomesticFlightRealism(returnAirlineFiltered, state, routeContext);
+
+  const ranked = rankFlights(realismFiltered, state, routeContext);
+  const rankedReturn = rankFlights(realismFilteredReturn, state, routeContext);
   if (state.direct_only) {
     const directOnly = ranked.filter((f) => f.stops === 0);
     const baseOutbound = directOnly.length > 0 ? directOnly.slice(0, 5) : ranked.slice(0, 5);

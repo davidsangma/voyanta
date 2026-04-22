@@ -2,9 +2,16 @@ const REQUIRED_FIELDS = ["source_city", "destination_city", "departure_date"];
 
 const CITY_ALIASES = {
   bangalore: "bengaluru",
+  bengaluru: "BLR",
   bombay: "mumbai",
+  mumbai: "BOM",
   calcutta: "kolkata",
+  kolkata: "CCU",
   delhi: "new delhi",
+  "new delhi": "DEL",
+  chennai: "MAA",
+  hyderabad: "HYD",
+  goa: "GOI",
   nyc: "new york",
   blr: "BLR",
   dxb: "DXB",
@@ -2626,12 +2633,15 @@ export async function GET(request) {
           }),
     ]);
     const hotels = hotelResult.hotels;
-    const packages = buildPackages(flightResult.flights, hotels, state);
-    const decisionPayload = buildDecisionPayload(packages, state, {
-      direct_fallback_used: flightResult.direct_fallback_used,
-    });
+    const packageRequested = state.package_required === "yes";
+    const packages = packageRequested ? buildPackages(flightResult.flights, hotels, state) : [];
+    const decisionPayload = packageRequested
+      ? buildDecisionPayload(packages, state, {
+          direct_fallback_used: flightResult.direct_fallback_used,
+        })
+      : { decision: null, why_for_you: [], tradeoff: null };
 
-    if (state.package_required === "yes" && packages.length === 0) {
+    if (packageRequested && packages.length === 0) {
       let message =
         "I could not build a complete package yet. Try allowing layovers, broadening dates, or relaxing hotel filters.";
 
@@ -2674,7 +2684,7 @@ export async function GET(request) {
       actions: buildActions(state),
       meta: {
         ranked_by: ["price", "duration", "stops", "hotel_quality"],
-        package_requested: state.package_required === "yes",
+        package_requested: packageRequested,
         hotel_requested: hotelRequested,
         hotel_count: hotels.length,
         package_count: packages.length,

@@ -5,7 +5,6 @@ import { AppHeader } from "@/components/nomad/AppHeader";
 import { ActionChips } from "@/components/nomad/ActionChips";
 import { AssistantBubble } from "@/components/nomad/AssistantBubble";
 import { BestPickCard } from "@/components/nomad/BestPickCard";
-import { BundleCards } from "@/components/nomad/BundleCards";
 import { Composer } from "@/components/nomad/Composer";
 import { FlightSegmentCard } from "@/components/nomad/FlightSegmentCard";
 import { HotelCard } from "@/components/nomad/HotelCard";
@@ -620,8 +619,11 @@ export default function Home() {
               : `b-${index}-${JSON.stringify(message.data).slice(0, 80)}`;
           const resultPayload =
             message.role === "bot" && isResultResponse(message.data) ? message.data : null;
-          const primaryRecommendation = resultPayload?.decision?.primary_recommendation || null;
-          const fallbackRecommendation = resultPayload?.decision?.fallback_recommendation || null;
+          const packageRequested = Boolean(resultPayload?.meta?.package_requested);
+          const primaryRecommendation =
+            packageRequested ? resultPayload?.decision?.primary_recommendation || null : null;
+          const fallbackRecommendation =
+            packageRequested ? resultPayload?.decision?.fallback_recommendation || null : null;
           const tradeoffAxes = resultPayload?.tradeoff?.axes || null;
           const whyForYou = (resultPayload?.why_for_you || []).slice(0, 3);
 
@@ -770,10 +772,6 @@ export default function Home() {
                               removing hotel filters, or changing dates.
                             </p>
                           </div>
-                        )}
-
-                        {!message.data.meta?.package_requested && (message.data.packages || []).length > 0 && (
-                          <BundleCards items={message.data.packages || []} />
                         )}
 
                         {!message.data.meta?.package_requested && (

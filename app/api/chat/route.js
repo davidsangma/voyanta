@@ -848,6 +848,11 @@ function applyRuleOverrides(state, history, preferences) {
   const explicitPackageRequired = extractPackageRequiredFromText(latest);
   if (explicitPackageRequired) {
     setSlot(state, "package_required", explicitPackageRequired, "confirmed");
+    if (explicitPackageRequired === "no") {
+      setSlot(state, "hotel_required", "no", "confirmed");
+      clearSlot(state, "hotel_star_rating");
+      clearSlot(state, "hotel_brand");
+    }
   }
 
   const explicitHotelRequired = extractHotelRequiredFromText(latest);
@@ -959,7 +964,6 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   const parsedTripType = normalizeTripType(parsedUpdate?.trip_type);
   const parsedPackageRequired = normalizePackageRequired(parsedUpdate?.package_required);
   const klass = normalizeCabinClass(parsedUpdate?.class);
-  const parsedAirlineBrand = normalizeWhitespace(parsedUpdate?.airline_brand || "") || null;
   const hotelRequired = normalizeHotelRequired(parsedUpdate?.hotel_required);
   const parsedHotelBrand = normalizeWhitespace(parsedUpdate?.hotel_brand || "") || null;
 
@@ -976,8 +980,13 @@ function applyParsedUpdate(state, parsedUpdate, history, preferences) {
   if (returnDate) setSlot(next, "return_date", returnDate, "inferred");
   if (parsedTripType) setSlot(next, "trip_type", parsedTripType, "inferred");
   if (parsedPackageRequired) setSlot(next, "package_required", parsedPackageRequired, "inferred");
+  if (parsedPackageRequired === "no") {
+    setSlot(next, "hotel_required", "no", "inferred");
+    clearSlot(next, "hotel_star_rating");
+    clearSlot(next, "hotel_brand");
+  }
   if (klass) setSlot(next, "class", klass, "inferred");
-  if (parsedAirlineBrand) setSlot(next, "airline_brand", parsedAirlineBrand, "inferred");
+  // Prevent sticky airline bias from model inference; only explicit user text should set airline brand.
   if (hotelRequired) setSlot(next, "hotel_required", hotelRequired, "inferred");
   if (parsedHotelBrand) setSlot(next, "hotel_brand", parsedHotelBrand, "inferred");
 
@@ -1031,6 +1040,19 @@ function validateState(state) {
     missing.push("package_required");
   }
 
+  if (
+    missing.length === 0 &&
+    state.trip_type === "round_trip" &&
+    state.departure_date &&
+    state.return_date
+  ) {
+    const departure = new Date(state.departure_date);
+    const returning = new Date(state.return_date);
+    if (!Number.isNaN(departure.getTime()) && !Number.isNaN(returning.getTime()) && returning < departure) {
+      missing.push("date_range");
+    }
+  }
+
   return { missing };
 }
 
@@ -1059,6 +1081,12 @@ function buildFollowUpQuestion(missing, state) {
 
   if (field === "return_date") {
     return "What is your return date? (e.g., next Sunday or YYYY-MM-DD)";
+  }
+
+  if (field === "date_range") {
+    return state.departure_date && state.return_date
+      ? `Your return date (${state.return_date}) is before departure (${state.departure_date}). Please share a valid return date after departure.`
+      : "Please share valid trip dates where return is after departure.";
   }
 
   if (field === "package_required") {

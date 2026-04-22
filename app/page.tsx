@@ -776,57 +776,81 @@ export default function Home() {
                           <BundleCards items={message.data.packages || []} />
                         )}
 
-                        {!message.data.meta?.package_requested && <div className="mb-4">
-                          <p className="font-semibold mb-2">Flights</p>
-                          {message.data.meta?.direct_fallback_used && (
-                            <p className="mb-2 text-sm text-[var(--text-secondary)]">
-                              No direct flights are available for this route/date. Showing next best options with
-                              stops.
-                            </p>
-                          )}
-                          <div className="space-y-2">
-                            {(message.data.best_flights || []).slice(0, 3).map((flight, i) => (
-                              <FlightSegmentCard
-                                key={i}
-                                airline={flight.airline}
-                                airlineCode={flight.airline_iata_code}
-                                airlineLogoUrl={flight.airline_logo_url}
-                                from={flight.origin}
-                                to={flight.destination}
-                                duration={flight.duration}
-                                cabin={toTitleCase((flight.cabin_class || "economy").toLowerCase())}
-                                stopsText={
-                                  flight.stops_label ||
-                                  `${flight.stops} stop${flight.stops === 1 ? "" : "s"}`
-                                }
-                                depart={flight.departure_time || "N/A"}
-                                flightsText={
-                                  Array.isArray(flight.flight_numbers) && flight.flight_numbers.length > 0
-                                    ? flight.flight_numbers.join(", ")
-                                    : flight.flight_number || "N/A"
-                                }
-                                returnText={
-                                  flight.trip_type === "round_trip"
-                                    ? `${flight.return_origin || flight.destination} -> ${
-                                        flight.return_destination || flight.origin
-                                      } | Departs: ${flight.return_departure_time || "N/A"}`
-                                    : undefined
-                                }
-                                returnFlightsText={
-                                  flight.trip_type === "round_trip"
-                                    ? Array.isArray(flight.return_flight_numbers) &&
-                                      flight.return_flight_numbers.length > 0
-                                      ? flight.return_flight_numbers.join(", ")
-                                      : "N/A"
-                                    : undefined
-                                }
-                                showRoundTripBadge={flight.trip_type === "round_trip"}
-                                price={flight.price}
-                                variant={i === 0 ? "success" : "neutral"}
-                              />
-                            ))}
+                        {!message.data.meta?.package_requested && (
+                          <div className="mb-4">
+                            <p className="mb-2 font-semibold">Flights</p>
+                            {message.data.meta?.direct_fallback_used && (
+                              <p className="mb-2 text-sm text-[var(--text-secondary)]">
+                                No direct flights are available for this route/date. Showing next best options with
+                                stops.
+                              </p>
+                            )}
+
+                            <div className="space-y-2">
+                              {(message.data.best_flights || []).slice(0, 3).map((flight, i) => (
+                                <FlightSegmentCard
+                                  key={`outbound-${i}`}
+                                  label="Onward Flight"
+                                  airline={flight.airline}
+                                  airlineCode={flight.airline_iata_code}
+                                  airlineLogoUrl={flight.airline_logo_url}
+                                  from={flight.origin}
+                                  to={flight.destination}
+                                  duration={flight.duration}
+                                  cabin={toTitleCase((flight.cabin_class || "economy").toLowerCase())}
+                                  stopsText={
+                                    flight.stops_label ||
+                                    `${flight.stops} stop${flight.stops === 1 ? "" : "s"}`
+                                  }
+                                  depart={flight.departure_time || "N/A"}
+                                  flightsText={
+                                    Array.isArray(flight.flight_numbers) && flight.flight_numbers.length > 0
+                                      ? flight.flight_numbers.join(", ")
+                                      : flight.flight_number || "N/A"
+                                  }
+                                  showRoundTripBadge={flight.trip_type === "round_trip"}
+                                  price={flight.onward_price || flight.price}
+                                  variant={i === 0 ? "success" : "neutral"}
+                                />
+                              ))}
+                            </div>
+
+                            {(message.data.best_flights || []).some((flight) => flight.trip_type === "round_trip") && (
+                              <div className="mt-4">
+                                <p className="mb-2 font-semibold">Return Options</p>
+                                <div className="space-y-2">
+                                  {(message.data.best_flights || [])
+                                    .filter((flight) => flight.trip_type === "round_trip")
+                                    .slice(0, 3)
+                                    .map((flight, i) => (
+                                      <FlightSegmentCard
+                                        key={`return-${i}`}
+                                        label="Returning Flight"
+                                        airline={flight.return_airline || flight.airline}
+                                        airlineCode={flight.return_airline_iata_code || flight.airline_iata_code}
+                                        airlineLogoUrl={flight.return_airline_logo_url || flight.airline_logo_url}
+                                        from={flight.return_origin || flight.destination}
+                                        to={flight.return_destination || flight.origin}
+                                        cabin={toTitleCase(
+                                          (flight.return_cabin_class || flight.cabin_class || "economy").toLowerCase()
+                                        )}
+                                        depart={flight.return_departure_time || "N/A"}
+                                        arrive={flight.return_arrival_time || "N/A"}
+                                        flightsText={
+                                          Array.isArray(flight.return_flight_numbers) &&
+                                          flight.return_flight_numbers.length > 0
+                                            ? flight.return_flight_numbers.join(", ")
+                                            : "N/A"
+                                        }
+                                        price={flight.return_price || flight.price}
+                                        variant={i === 0 ? "success" : "neutral"}
+                                      />
+                                    ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>}
+                        )}
 
                         {!message.data.meta?.package_requested && (message.data.hotels || []).length > 0 && (
                           <div>

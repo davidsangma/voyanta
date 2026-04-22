@@ -112,6 +112,13 @@ const DUFFEL_MAX_CODES_PER_REQUEST = 12;
 const LUXURY_HOTEL_CHAINS = [
   "Mandarin Oriental",
   "Aman",
+  "Marriott",
+  "JW Marriott",
+  "Hilton",
+  "Hyatt",
+  "Westin",
+  "Sheraton",
+  "Le Meridien",
   "Bulgari",
   "Oetker Collection",
   "Rosewood",
@@ -478,6 +485,44 @@ function isLuxuryIntent(state) {
   return state?.budget_mode === "luxury" || Number(state?.hotel_star_rating) >= 5;
 }
 
+function parsePositiveEnvNumber(key, fallback) {
+  const raw = process.env[key];
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return value;
+}
+
+function getLuxuryHotelPriceFloors(state) {
+  const destination = simplifyBrandText(state?.destination_city || "");
+  const domesticIndia = /\b(india|goa|delhi|mumbai|bangalore|bengaluru|chennai|hyderabad|kolkata|pune)\b/.test(
+    destination
+  );
+
+  const domesticFloors = {
+    hardFloor: parsePositiveEnvNumber("LUXURY_HOTEL_DOMESTIC_HARD_FLOOR_INR", 3500),
+    premiumFloor: parsePositiveEnvNumber("LUXURY_HOTEL_DOMESTIC_PREMIUM_FLOOR_INR", 5500),
+    strongFloor: parsePositiveEnvNumber("LUXURY_HOTEL_DOMESTIC_STRONG_FLOOR_INR", 9000),
+  };
+
+  const globalFloors = {
+    hardFloor: parsePositiveEnvNumber(
+      "LUXURY_HOTEL_HARD_FLOOR_INR",
+      parsePositiveEnvNumber("LUXURY_HOTEL_INTERNATIONAL_HARD_FLOOR_INR", 5000)
+    ),
+    premiumFloor: parsePositiveEnvNumber(
+      "LUXURY_HOTEL_PREMIUM_FLOOR_INR",
+      parsePositiveEnvNumber("LUXURY_HOTEL_INTERNATIONAL_PREMIUM_FLOOR_INR", 7000)
+    ),
+    strongFloor: parsePositiveEnvNumber(
+      "LUXURY_HOTEL_STRONG_FLOOR_INR",
+      parsePositiveEnvNumber("LUXURY_HOTEL_INTERNATIONAL_STRONG_FLOOR_INR", 12000)
+    ),
+  };
+
+  // Domestic luxury inventory can be cheaper than international luxury, but still should not look budget.
+  return domesticIndia ? domesticFloors : globalFloors;
+}
+
 function matchesLuxuryChain(hotelName) {
   const haystack = simplifyBrandText(hotelName || "");
   if (!haystack) return false;
@@ -491,6 +536,30 @@ function matchesLuxuryChain(hotelName) {
     if (tokens.length === 0) return false;
     return tokens.every((token) => haystack.includes(token));
   });
+}
+
+function hasPremiumHotelSignal(hotel) {
+  const chainMatch = matchesLuxuryChain(hotel?.name);
+  const classMatch = typeof hotel?.hotel_class === "number" && hotel.hotel_class >= 5;
+  const ratingMatch = typeof hotel?.rating === "number" && hotel.rating >= 4.5;
+
+  return chainMatch || classMatch || ratingMatch;
+}
+
+function meetsLuxuryPlausibility(hotel, state) {
+  if (!isLuxuryIntent(state)) return true;
+
+  const price = typeof hotel?.price_value === "number" ? hotel.price_value : null;
+  const chainMatch = matchesLuxuryChain(hotel?.name);
+  const premiumSignal = hasPremiumHotelSignal(hotel);
+  const floors = getLuxuryHotelPriceFloors(state);
+
+  if (price == null) return premiumSignal;
+  if (price >= floors.strongFloor) return true;
+  if (price >= floors.premiumFloor && premiumSignal) return true;
+  if (price >= floors.hardFloor && chainMatch) return true;
+
+  return false;
 }
 
 function detectIntent(history) {
@@ -1910,11 +1979,12 @@ function dedupeHotels(hotels) {
       return;
     }
 
-    // Prefer entries with richer data (price + rating + link).
+    // Prefer entries with richer data (price + rating + link + image).
     const score = (item) =>
       (typeof item.price_value === "number" ? 1 : 0) +
       (typeof item.rating === "number" ? 1 : 0) +
-      (item.link && item.link !== "#" ? 1 : 0);
+      (item.link && item.link !== "#" ? 1 : 0) +
+      (item.image_url ? 1 : 0);
 
     if (score(hotel) > score(existing)) {
       byKey.set(key, hotel);
@@ -1943,6 +2013,15 @@ async function fetchHotelsFromSerpApi(state) {
     return data?.properties || [];
   }
 
+  function extractSerpImage(hotel) {
+    const images = Array.isArray(hotel?.images) ? hotel.images : [];
+    if (images.length > 0) {
+      const first = images[0] || {};
+      return first?.original_image || first?.thumbnail || null;
+    }
+    return hotel?.thumbnail || hotel?.image || null;
+  }
+
   function mapHotels(rawHotels) {
     return rawHotels.slice(0, 20).map((hotel) => ({
       name: hotel?.name || "Unknown",
@@ -1951,6 +2030,7 @@ async function fetchHotelsFromSerpApi(state) {
       price: hotel?.rate_per_night?.lowest || "N/A",
       price_value: parsePrice(hotel?.rate_per_night?.lowest),
       link: hotel?.link || "#",
+      image_url: extractSerpImage(hotel),
     }));
   }
 
@@ -2002,6 +2082,31 @@ async function fetchBookingDestination(destinationCity) {
 function mapBookingHotels(rawHotels, nights = 1) {
   if (!Array.isArray(rawHotels)) return [];
 
+  function pickBookingImage(property) {
+    const candidates = [
+      property?.photoMainUrl,
+      property?.mainPhotoUrl,
+      property?.photo_url,
+      property?.image_url,
+      property?.thumbnail,
+      property?.mainPhoto?.url,
+    ];
+
+    if (Array.isArray(property?.photoUrls) && property.photoUrls.length > 0) {
+      candidates.push(property.photoUrls[0]);
+    }
+
+    if (Array.isArray(property?.photos) && property.photos.length > 0) {
+      const first = property.photos[0];
+      if (typeof first === "string") candidates.push(first);
+      if (first && typeof first === "object") {
+        candidates.push(first.url, first.image, first.thumbnail, first.main);
+      }
+    }
+
+    return candidates.find((value) => typeof value === "string" && value.startsWith("http")) || null;
+  }
+
   return rawHotels.slice(0, 20).map((entry) => {
     const property = entry?.property || {};
     const name = normalizeWhitespace(property?.name || "");
@@ -2019,6 +2124,7 @@ function mapBookingHotels(rawHotels, nights = 1) {
       price: perNight != null ? `${Math.round(perNight)} ${currency}/night` : "N/A",
       price_value: perNight,
       link: property?.url || property?.hotelUrl || fallbackLink,
+      image_url: pickBookingImage(property),
     };
   });
 }
@@ -2078,11 +2184,22 @@ async function fetchHotels(state) {
     hotels = hotels.filter((h) => matchesHotelBrand(h, state.hotel_brand));
   }
 
+  let luxuryRelaxReason = null;
+  if (isLuxuryIntent(state)) {
+    const luxuryPlausible = hotels.filter((hotel) => meetsLuxuryPlausibility(hotel, state));
+    if (luxuryPlausible.length > 0) {
+      hotels = luxuryPlausible;
+    } else if (hotels.length > 0) {
+      // Keep fallback inventory if strict luxury plausibility removes everything.
+      luxuryRelaxReason = "relaxed_luxury_plausibility";
+    }
+  }
+
   if (hotels.length > 0) {
     return {
       hotels: rankHotels(hotels, state).slice(0, 5),
-      hotel_filter_relaxed: false,
-      hotel_relax_reason: null,
+      hotel_filter_relaxed: Boolean(luxuryRelaxReason),
+      hotel_relax_reason: luxuryRelaxReason,
     };
   }
 

@@ -116,6 +116,11 @@ const DUFFEL_VERSION = process.env.DUFFEL_VERSION || "v2";
 const DUFFEL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const DUFFEL_MAX_PAGES = 12;
 const DUFFEL_MAX_CODES_PER_REQUEST = 12;
+const SERPAPI_KEYS = [
+  process.env.SERPAPI_KEY,
+  process.env.SERPAPI_KEY_FALLBACK,
+  process.env.SERPAPI_KEY_2,
+].filter((key) => typeof key === "string" && key.trim().length > 0);
 const LUXURY_HOTEL_CHAINS = [
   "Mandarin Oriental",
   "Aman",
@@ -539,6 +544,49 @@ function simplifyBrandText(value) {
 
   // Helps match common minor misspellings like "mariott" vs "marriott".
   return cleaned.replace(/([a-z])\1+/g, "$1");
+}
+
+function isSerpQuotaMessage(message) {
+  const text = simplifyBrandText(message || "");
+  if (!text) return false;
+  return (
+    text.includes("run out of searches") ||
+    text.includes("out of searches") ||
+    text.includes("searches left") ||
+    text.includes("limit reached") ||
+    text.includes("quota")
+  );
+}
+
+async function fetchSerpApiJson(baseParams) {
+  const keys = SERPAPI_KEYS;
+  if (!Array.isArray(keys) || keys.length === 0) {
+    return { ok: false, status: 500, data: { error: "missing_serpapi_keys" } };
+  }
+
+  let lastFailure = { ok: false, status: 500, data: { error: "serpapi_request_failed" } };
+
+  for (const key of keys) {
+    const params = new URLSearchParams(baseParams);
+    params.set("api_key", key);
+
+    const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+
+    const errorText = data?.error || data?.message || "";
+    if (res.ok && !isSerpQuotaMessage(errorText)) {
+      return { ok: true, status: res.status, data };
+    }
+
+    lastFailure = { ok: false, status: res.status, data };
+
+    // Retry with next key only for quota-like failures.
+    if (!isSerpQuotaMessage(errorText)) {
+      return lastFailure;
+    }
+  }
+
+  return lastFailure;
 }
 
 function toBrandTokens(value) {
@@ -1313,26 +1361,24 @@ async function enrichFlightsWithDuffel(flights) {
 }
 
 async function lookupAirportByFlightsEngine(query) {
-  const res = await fetch(
-    `https://serpapi.com/search.json?engine=google_flights_airports&q=${encodeURIComponent(
-      query
-    )}&api_key=${process.env.SERPAPI_KEY}`
+  const { ok, data } = await fetchSerpApiJson(
+    new URLSearchParams({
+      engine: "google_flights_airports",
+      q: query,
+    })
   );
 
-  const data = await res.json().catch(() => ({}));
   const code = data?.airports?.[0]?.iata_code || data?.airport_results?.[0]?.iata_code || null;
-
-  return { ok: res.ok, code, apiError: data?.error || null };
+  return { ok, code, apiError: data?.error || null };
 }
 
 async function lookupAirportByGoogleSearch(query) {
-  const res = await fetch(
-    `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(
-      `${query} airport IATA code`
-    )}&api_key=${process.env.SERPAPI_KEY}`
+  const { ok, data } = await fetchSerpApiJson(
+    new URLSearchParams({
+      engine: "google",
+      q: `${query} airport IATA code`,
+    })
   );
-
-  const data = await res.json().catch(() => ({}));
   const snippets = [
     data?.answer_box?.answer,
     data?.answer_box?.snippet,
@@ -1342,7 +1388,7 @@ async function lookupAirportByGoogleSearch(query) {
     .filter(Boolean)
     .join(" ");
 
-  return { ok: res.ok, code: extractIataFromText(snippets), apiError: data?.error || null };
+  return { ok, code: extractIataFromText(snippets), apiError: data?.error || null };
 }
 
 async function resolveAirportCode(city) {
@@ -1618,7 +1664,6 @@ async function fetchSerpFlightsOneWay(origin, destination, departureDate, state)
     currency: "INR",
     hl: "en",
     gl: "in",
-    api_key: process.env.SERPAPI_KEY,
   });
 
   const travelClass = mapCabinClassToSerpValue(state.class);
@@ -1626,10 +1671,8 @@ async function fetchSerpFlightsOneWay(origin, destination, departureDate, state)
 
   params.set("type", "2");
 
-  const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-  if (!res.ok) return [];
-
-  const data = await res.json();
+  const { ok, data } = await fetchSerpApiJson(params);
+  if (!ok) return [];
   const sourceFlights = data?.best_flights || data?.other_flights || [];
 
   const normalized = sourceFlights.slice(0, 15).map((flight) => {
@@ -2224,13 +2267,11 @@ async function fetchHotelsFromSerpApi(state) {
     currency: "INR",
     hl: "en",
     gl: "in",
-    api_key: process.env.SERPAPI_KEY,
   });
 
   async function fetchProperties(urlParams) {
-    const res = await fetch(`https://serpapi.com/search.json?${urlParams.toString()}`);
-    if (!res.ok) return [];
-    const data = await res.json();
+    const { ok, data } = await fetchSerpApiJson(urlParams);
+    if (!ok) return [];
     return data?.properties || [];
   }
 
@@ -2264,7 +2305,6 @@ async function fetchHotelsFromSerpApi(state) {
       currency: "INR",
       hl: "en",
       gl: "in",
-      api_key: process.env.SERPAPI_KEY,
     });
     rawHotels = await fetchProperties(fallback);
   }
@@ -2533,8 +2573,11 @@ function buildUpdateSummary(previousState, nextState) {
 
 export async function GET(request) {
   try {
-    if (!process.env.OPENAI_API_KEY || !process.env.SERPAPI_KEY) {
-      return json({ error: "Server is missing OPENAI_API_KEY or SERPAPI_KEY." }, 500);
+    if (!process.env.OPENAI_API_KEY || SERPAPI_KEYS.length === 0) {
+      return json(
+        { error: "Server is missing OPENAI_API_KEY or all SERPAPI keys (SERPAPI_KEY/SERPAPI_KEY_FALLBACK/SERPAPI_KEY_2)." },
+        500
+      );
     }
 
     const { searchParams } = new URL(request.url);
